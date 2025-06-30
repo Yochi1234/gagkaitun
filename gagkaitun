@@ -1,4 +1,4 @@
---[[
+--[[  
     @author Enhanced Auto-Farm for Grow a Garden
     @description From 0 to 300 Tomatoes, with fallback to Carrot and robust farm/harvest logic
 ]]
@@ -80,45 +80,6 @@ local function TryBuySeed(seedName)
     return bought
 end
 
--- Equip tool function
-local function EquipTool(seedName)
-    local char = LocalPlayer.Character
-    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
-
-    -- หา tool ทั้งใน Backpack และ Character
-    local tool = LocalPlayer.Backpack:FindFirstChild(seedName)
-    if not tool then
-        tool = char:FindFirstChild(seedName)
-    end
-
-    -- ถ้ายังไม่เจอ ลองเช็คชื่อ Tool ทั้งหมดใน Backpack กับ Character แล้วแสดงชื่อที่เจอ (debug)
-    if not tool then
-        print("🔍 Tool '" .. seedName .. "' ไม่พบใน Backpack หรือ Character, มีไอเท็มดังนี้:")
-        for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
-            if item:IsA("Tool") then
-                print("Backpack Tool: " .. item.Name)
-            end
-        end
-        for _, item in pairs(char:GetChildren()) do
-            if item:IsA("Tool") then
-                print("Character Tool: " .. item.Name)
-            end
-        end
-        return false
-    end
-
-    -- ถ้า Tool อยู่ในตัวละครแล้ว
-    if tool.Parent == char then
-        return true -- ถืออยู่แล้ว
-    end
-
-    -- ถ้า Tool อยู่ใน Backpack ให้ Equip
-    humanoid:EquipTool(tool)
-    task.wait(0.2) -- รอ Equip ให้เรียบร้อย
-    return true
-end
-
 -- เช็คจำนวน Crops ในกระเป๋า
 local function GetCropCount()
     local char = LocalPlayer.Character
@@ -139,7 +100,7 @@ local function GetCropCount()
     return count
 end
 
--- Planting seeds (ปลูกทีละจุดโดย Equip ก่อน)
+-- Planting seeds (แก้ใหม่ ไม่ Equip tool ปลูกโดยส่ง event ปลูกเลย)
 local function PlantSeed(seedName)
     local farm = WaitForMyFarm()
     if not farm then return end
@@ -150,11 +111,6 @@ local function PlantSeed(seedName)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
-    if not EquipTool(seedName) then
-        print("❌ ไม่พบเมล็ดพันธุ์ในกระเป๋า: " .. seedName)
-        return
-    end
 
     -- วาร์ปไปกลางฟาร์มก่อนปลูกทั้งหมด
     local middle = farm:GetPivot().Position + Vector3.new(0, 2, 0)
