@@ -315,7 +315,6 @@ end
 -- Seed progression system
 local SeedProgression = {
     {name = "Carrot", price = 5, unlock = 0},
-    {name = "Corn", price = 15, unlock = 100},
     {name = "Tomato", price = 25, unlock = 500},
     {name = "Potato", price = 40, unlock = 1000},
     {name = "Watermelon", price = 80, unlock = 2500},
