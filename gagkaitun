@@ -1,148 +1,164 @@
 --[[
-    @author Enhanced Auto-Farm for Grow a Garden - PLAYER READY FIXED
-    @description Fixed version with better player loading detection + v1415-style auto farm
-    https://www.roblox.com/games/126884695634066
+    @author Grow a Garden - Auto to 300 Tomatoes
+    @description Auto-farm from scratch until you have 300 Tomato crops grown
 ]]
 
 -- Wait for game to load completely before doing anything
 task.wait(3)
 
--- Check if we're in the right environment
-if not game or not game.GetService then
-    error("Script not running in proper Roblox environment")
-    return
-end
-
--- Safe service initialization with error handling
-local function GetServiceSafely(serviceName)
-    local success, service = pcall(function()
-        return game:GetService(serviceName)
-    end)
-    if not success then warn(`Failed to get service: {serviceName}`) return nil end
-    return service
-end
-
--- Initialize services safely
-local ReplicatedStorage = GetServiceSafely("ReplicatedStorage")
-local Players = GetServiceSafely("Players")
-local RunService = GetServiceSafely("RunService")
-local TweenService = GetServiceSafely("TweenService")
-local UserInputService = GetServiceSafely("UserInputService")
-
-if not ReplicatedStorage or not Players or not RunService then
-    error("Essential services not available - game may not be loaded")
-    return
-end
-
+-- Initialize services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-if not LocalPlayer then
-    error("LocalPlayer not found - script may be running too early")
+
+-- Validate player
+if not LocalPlayer then return end
+
+-- Wait for leaderstats
+local function WaitForLeaderstats()
+    local stats = LocalPlayer:FindFirstChild("leaderstats")
+    local tries = 0
+    while not stats and tries < 30 do
+        stats = LocalPlayer:FindFirstChild("leaderstats")
+        tries += 1
+        task.wait(1)
+    end
+    return stats
+end
+
+local Leaderstats = WaitForLeaderstats()
+if not Leaderstats then
+    warn("No leaderstats")
     return
 end
 
--- Fix seed list (no Corn in v1415)
-local SeedProgression = {
-    {name = "Carrot", price = 5, unlock = 0},
-    {name = "Tomato", price = 25, unlock = 500},
-    {name = "Potato", price = 40, unlock = 1000},
-    {name = "Watermelon", price = 80, unlock = 2500},
-    {name = "Pumpkin", price = 150, unlock = 5000},
-    {name = "Blueberry", price = 300, unlock = 10000},
-}
+-- Find Sheckles
+local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
+if not Sheckles then warn("No money stat") return end
 
-local AutoEnabled = false
-local AutoLoopConnection = nil
-local ShecklesCount = nil
-local InfoLabel, DebugLabel, ToggleButton, StatusLabel = nil
-
--- Return best seed by unlock value
-local function GetBestSeed()
-    local money = ShecklesCount and ShecklesCount.Value or 0
-    for i = #SeedProgression, 1, -1 do
-        if money >= SeedProgression[i].unlock then
-            return SeedProgression[i].name
-        end
-    end
-    return "Carrot"
+-- GameEvents detection
+local GameEvents = nil
+for _, name in {"GameEvents", "Events", "Remotes"} do
+    local folder = ReplicatedStorage:FindFirstChild(name)
+    if folder then GameEvents = folder break end
 end
+if not GameEvents then warn("No GameEvents") return end
 
--- Dummy: Replace with actual RemoteEvents
-local function BuySeeds(seed)
-    print("Buying seed:", seed)
-end
-
-local function PlantSeeds(seed)
-    print("Planting seed:", seed)
-end
-
-local function HarvestCrops()
-    print("Harvesting crops...")
-end
-
-local function SellCrops()
-    print("Selling crops...")
-end
-
--- Auto loop that mimics v1415-style
-local function AutoFarmLoop()
-    AutoLoopConnection = task.spawn(function()
-        while AutoEnabled do
-            local success = pcall(function()
-                if ShecklesCount and InfoLabel then
-                    InfoLabel.Text = `💰 Money: $${ShecklesCount.Value}`
-                end
-                if DebugLabel then
-                    DebugLabel.Text = `🔧 Seed: {GetBestSeed()}`
-                end
-
-                local seed = GetBestSeed()
-                BuySeeds(seed)
-                task.wait(1.5)
-                PlantSeeds(seed)
-                task.wait(1.5)
-                HarvestCrops()
-                task.wait(1.5)
-                SellCrops()
-                task.wait(1.5)
-            end)
-            if not success then
-                StatusLabel.Text = "❌ Error occurred"
-                task.wait(2)
+-- Get My Farm
+local function GetMyFarm()
+    for _, farm in Workspace:GetChildren() do
+        if farm:FindFirstChild("Important") then
+            local data = farm.Important:FindFirstChild("Data")
+            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
+                return farm
             end
         end
-    end)
+    end
+    return nil
 end
 
-local function ToggleAutoFarm()
-    AutoEnabled = not AutoEnabled
-    if AutoEnabled then
-        ToggleButton.Text = "STOP AUTO FARM"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        StatusLabel.Text = "🚀 Auto-farm started"
-        if AutoLoopConnection then task.cancel(AutoLoopConnection) end
-        AutoFarmLoop()
-    else
-        ToggleButton.Text = "START AUTO FARM"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        StatusLabel.Text = "⏹️ Auto-farm stopped"
-        if AutoLoopConnection then task.cancel(AutoLoopConnection) AutoLoopConnection = nil end
+-- Farming Functions
+local function BuySeed(seedName)
+    for _, evt in {"BuySeed", "BuySeedStock"} do
+        local event = GameEvents:FindFirstChild(evt)
+        if event then event:FireServer(seedName) break end
     end
 end
 
--- GUI Simulation (just buttons, for example)
-ToggleButton = Instance.new("TextButton")
-ToggleButton.Text = "START AUTO FARM"
-StatusLabel = Instance.new("TextLabel")
-InfoLabel = Instance.new("TextLabel")
-DebugLabel = Instance.new("TextLabel")
+local function PlantSeed(seedName)
+    local farm = GetMyFarm()
+    if not farm then return end
+    local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
+    for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
+        local event = GameEvents:FindFirstChild(evt)
+        if event then
+            event:FireServer(Vector3.new(pos.X, pos.Y, pos.Z), seedName)
+            break
+        end
+    end
+end
 
-ToggleButton.MouseButton1Click:Connect(function()
-    local success = pcall(ToggleAutoFarm)
-    if not success then warn("Failed to toggle auto-farm") end
-end)
+local function Harvest()
+    local farm = GetMyFarm()
+    if not farm then return end
+    local plants = farm.Important:FindFirstChild("Plants_Physical")
+    if not plants then return end
 
--- Fake value for money
-ShecklesCount = Instance.new("IntValue")
-ShecklesCount.Value = 0
+    for _, crop in pairs(plants:GetChildren()) do
+        local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt and prompt.Enabled then
+            fireproximityprompt(prompt)
+            task.wait(0.1)
+        end
+    end
+end
 
-print("✅ v1415-style Auto-Farm script ready.")
+local function Sell()
+    local sellPos = CFrame.new(62, 4, -26)
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = sellPos
+        task.wait(1)
+    end
+    for _, evt in {"SellInventory", "SellAll"} do
+        local event = GameEvents:FindFirstChild(evt)
+        if event then event:FireServer() break end
+    end
+end
+
+-- Count tomato plants
+local function CountTomato()
+    local farm = GetMyFarm()
+    if not farm then return 0 end
+    local count = 0
+    local plants = farm.Important:FindFirstChild("Plants_Physical")
+    if plants then
+        for _, crop in pairs(plants:GetChildren()) do
+            if crop.Name == "Tomato" then
+                count += 1
+            end
+        end
+    end
+    return count
+end
+
+-- Main Loop
+local function FarmToTomato300()
+    while true do
+        local tomatoes = CountTomato()
+        if tomatoes >= 300 then
+            print("✅ Reached 300 Tomato plants!")
+            break
+        end
+
+        -- Step 1: Buy carrot if broke
+        if Sheckles.Value < 30 then
+            BuySeed("Carrot")
+            task.wait(1)
+            PlantSeed("Carrot")
+            task.wait(1)
+            Harvest()
+            task.wait(1)
+            Sell()
+            task.wait(2)
+        else
+            -- Step 2: Buy tomato if enough money
+            if Sheckles.Value >= 25 then
+                BuySeed("Tomato")
+                task.wait(1)
+                PlantSeed("Tomato")
+                task.wait(1)
+            end
+
+            -- Step 3: Harvest and sell
+            Harvest()
+            task.wait(1)
+            Sell()
+            task.wait(2)
+        end
+    end
+end
+
+-- Start farming
+FarmToTomato300()
