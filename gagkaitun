@@ -1,4 +1,4 @@
---[[  
+--[[
     @author Enhanced Auto-Farm for Grow a Garden
     @description From 0 to 300 Tomatoes, with fallback to Carrot and robust farm/harvest logic
 ]]
@@ -129,24 +129,30 @@ local function PlantSeed(seedName)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-  local function GetFarmCenter(farm)
-    if not farm then return nil end
-    -- เช็คว่า farm มี GetPivot() หรือไม่
-    if typeof(farm.GetPivot) == "function" then
-        return farm:GetPivot().Position
+    local centerPos = GetFarmCenter(farm)
+    if not centerPos then
+        print("❌ ไม่พบตำแหน่งกลางฟาร์ม")
+        return
     end
-    -- ถ้ามี PrimaryPart ใช้ได้เลย
-    if farm.PrimaryPart then
-        return farm.PrimaryPart.Position
-    end
-    -- ถ้า farm เป็น Folder หาหลักจาก BasePart ตัวแรก
-    for _, child in pairs(farm:GetChildren()) do
-        if child:IsA("BasePart") then
-            return child.Position
+
+    -- วาร์ปไปกลางฟาร์มก่อนปลูกทั้งหมด
+    hrp.CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 0))
+    task.wait(0.1)
+
+    local planted = 0
+    for _, part in pairs(locations:GetChildren()) do
+        local pos = part.Position + Vector3.new(0, 0.13, 0)
+        for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
+            local event = GameEvents:FindFirstChild(evt)
+            if event then
+                event:FireServer(pos, seedName)
+                planted += 1
+                task.wait(0.05) -- ปลูกเร็วขึ้น
+                break
+            end
         end
+        if planted >= 20 then break end -- จำกัดจำนวนปลูกต่อรอบ
     end
-    -- ถ้าหาไม่ได้เลย คืนค่า nil
-    return nil
 end
 
 -- Harvest
