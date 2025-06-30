@@ -1,4 +1,4 @@
---[[
+--[[  
     @author Enhanced Auto-Farm for Grow a Garden
     @description From 0 to 300 Tomatoes, with fallback to Carrot and robust farm/harvest logic
 ]]
@@ -62,20 +62,32 @@ local function WaitForMyFarm(timeout)
     return nil
 end
 
--- ฟังก์ชันช่วยหา center position ของฟาร์ม (รองรับ Model หรือ Folder)
+-- ✅ FIX: ฟังก์ชันหาจุดกลางฟาร์มแบบปลอดภัย (รองรับทั้ง Folder/Model)
 local function GetFarmCenter(farm)
     if not farm then return nil end
-    if typeof(farm.GetPivot) == "function" then
-        return farm:GetPivot().Position
+
+    -- ถ้าเป็น Model
+    if farm:IsA("Model") then
+        local success, cframe, _ = pcall(function()
+            return farm:GetBoundingBox()
+        end)
+        if success and cframe then
+            return cframe.Position
+        end
     end
+
+    -- ถ้ามี PrimaryPart
     if farm.PrimaryPart then
         return farm.PrimaryPart.Position
     end
-    for _, child in pairs(farm:GetChildren()) do
-        if child:IsA("BasePart") then
-            return child.Position
+
+    -- ถ้าเป็น Folder หรือไม่มีข้างต้น → หา BasePart ตัวแรก
+    for _, part in ipairs(farm:GetDescendants()) do
+        if part:IsA("BasePart") then
+            return part.Position
         end
     end
+
     return nil
 end
 
@@ -85,7 +97,7 @@ local function TryBuySeed(seedName)
     for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
         local event = GameEvents:FindFirstChild(evt)
         if event then
-            for i = 1, 5 do  -- ลองซื้อติดๆ กัน 5 ครั้งเพื่อให้ได้ seed เยอะ
+            for i = 1, 5 do
                 local success = pcall(function()
                     event:FireServer(seedName)
                 end)
@@ -97,7 +109,7 @@ local function TryBuySeed(seedName)
     return bought
 end
 
--- เช็คจำนวน Crops ในกระเป๋า
+-- Count crops
 local function GetCropCount()
     local char = LocalPlayer.Character
     local count = 0
@@ -117,7 +129,7 @@ local function GetCropCount()
     return count
 end
 
--- Planting seeds (แก้ไขการวาร์ปไปกลางฟาร์ม)
+-- Plant seed
 local function PlantSeed(seedName)
     local farm = WaitForMyFarm()
     if not farm then return end
@@ -172,17 +184,11 @@ local function Harvest()
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
             local cropPos = crop:GetPivot().Position
-            local dist = (hrp.Position - cropPos).Magnitude
-
-            if dist > 9 then
+            if (hrp.Position - cropPos).Magnitude > 9 then
                 hrp.CFrame = CFrame.new(cropPos + Vector3.new(0, 2, 0))
                 task.wait(0.2)
             end
-
-            pcall(function()
-                fireproximityprompt(prompt)
-            end)
-
+            pcall(function() fireproximityprompt(prompt) end)
             harvested += 1
             task.wait(0.1)
         end
@@ -229,8 +235,7 @@ local function FarmToTomato300()
             break
         end
 
-        local cropCount = GetCropCount()
-        if cropCount >= 20 then
+        if GetCropCount() >= 20 then
             print("📦 กระเป๋าเต็ม! กำลังขาย...")
             Sell()
             task.wait(0.3)
