@@ -1,6 +1,6 @@
 --[[
-    @author Grow a Garden - Auto to 300 Tomatoes (v3)
-    @description Auto-farm from scratch until you have 300 Tomato crops grown (farm detection fixed)
+    @author Grow a Garden - Auto to 300 Tomatoes (v3.1)
+    @description Auto-farm from scratch until you have 300 Tomato crops grown (improved farm detection)
 ]]
 
 -- Wait for game to load completely before doing anything
@@ -44,20 +44,14 @@ if not GameEvents then print("❌ No GameEvents folder found") return end
 
 print("📦 GameEvents folder: " .. GameEvents.Name)
 
--- Get My Farm with wait and debug
+-- Improved Get My Farm with flexible name matching
 local function GetMyFarm()
-    for _, child in pairs(Workspace:GetChildren()) do
-        if child:FindFirstChild("Important") then
+    for _, child in pairs(Workspace:GetDescendants()) do
+        if child:IsA("Model") and child:FindFirstChild("Important") then
             local data = child.Important:FindFirstChild("Data")
-            if data then
-                local owner = data:FindFirstChild("Owner")
-                if owner then
-                    print("👀 Checking farm: " .. child.Name .. " | Owner: " .. owner.Value)
-                    if owner.Value == LocalPlayer.Name then
-                        print("✅ Found player farm: " .. child.Name)
-                        return child
-                    end
-                end
+            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
+                print("✅ Found player farm: " .. child.Name)
+                return child
             end
         end
     end
@@ -118,7 +112,7 @@ local function Harvest()
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
             fireproximityprompt(prompt)
-            task.wait(0.1)
+            task.wait(0.05)
             count += 1
         end
     end
@@ -130,7 +124,7 @@ local function Sell()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         char.HumanoidRootPart.CFrame = sellPos
-        task.wait(1)
+        task.wait(0.3)
     end
     for _, evt in {"SellInventory", "SellAll", "Sell", "Sell_Inventory"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -176,13 +170,13 @@ local function FarmToTomato300()
             TryBuySeed("Carrot")
         end
 
-        task.wait(0.25)
+        task.wait(0.1)
         PlantSeed(seedToUse)
-        task.wait(0.25)
+        task.wait(0.1)
         Harvest()
-        task.wait(0.25)
+        task.wait(0.1)
         Sell()
-        task.wait(0.5)
+        task.wait(0.2)
     end
 end
 
