@@ -12,11 +12,33 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local Leaderstats = LocalPlayer.leaderstats
 local Backpack = LocalPlayer.Backpack
 local PlayerGui = LocalPlayer.PlayerGui
 
-local ShecklesCount = Leaderstats.Sheckles
+-- Wait for leaderstats to load
+local Leaderstats = LocalPlayer:WaitForChild("leaderstats", 10)
+if not Leaderstats then
+    warn("❌ Leaderstats not found! Game may not be fully loaded.")
+    return
+end
+
+-- Find the money stat (different games use different names)
+local ShecklesCount = Leaderstats:FindFirstChild("Sheckles") or 
+                     Leaderstats:FindFirstChild("Money") or 
+                     Leaderstats:FindFirstChild("Cash") or 
+                     Leaderstats:FindFirstChild("Coins") or
+                     Leaderstats:FindFirstChild("Currency")
+
+if not ShecklesCount then
+    warn("❌ Money stat not found in leaderstats!")
+    print("📋 Available stats:")
+    for _, stat in pairs(Leaderstats:GetChildren()) do
+        print(`  - {stat.Name}`)
+    end
+    return
+end
+
+print(`💰 Found money stat: {ShecklesCount.Name}`)
 
 --// Folders and Remotes Detection
 local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents") or ReplicatedStorage:FindFirstChild("Events") or ReplicatedStorage:FindFirstChild("Remotes")
@@ -25,6 +47,9 @@ local Farms = workspace:FindFirstChild("Farm") or workspace:FindFirstChild("Farm
 -- Auto-detect game structure for different versions
 local function DetectGameStructure()
     print("🔍 Detecting game structure...")
+    
+    -- Wait for ReplicatedStorage to load
+    wait(2)
     
     -- Check ReplicatedStorage structure
     local possibleEventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents"}
@@ -48,17 +73,36 @@ local function DetectGameStructure()
         end
     end
     
+    -- List available ReplicatedStorage children for debugging
+    print("📋 ReplicatedStorage children:")
+    for _, child in pairs(ReplicatedStorage:GetChildren()) do
+        print(`  - {child.Name} ({child.ClassName})`)
+    end
+    
+    -- List available Workspace children for debugging  
+    print("📋 Workspace children:")
+    for _, child in pairs(workspace:GetChildren()) do
+        if child.Name:lower():find("farm") then
+            print(`  - {child.Name} ({child.ClassName}) - FARM RELATED`)
+        end
+    end
+    
     -- List available events for debugging
     if GameEvents then
         print("📋 Available GameEvents:")
         for _, child in pairs(GameEvents:GetChildren()) do
-            print(`  - {child.Name}`)
+            print(`  - {child.Name} ({child.ClassName})`)
         end
+    else
+        print("❌ No GameEvents folder found!")
     end
 end
 
--- Call detection on startup
-DetectGameStructure()
+-- Call detection on startup with delay
+task.spawn(function()
+    wait(3) -- รอให้เกมโหลดเสร็จ
+    DetectGameStructure()
+end)
 
 --// Progression System
 local SeedProgression = {
@@ -166,6 +210,8 @@ local function SmoothWarp(targetCFrame, speed)
 end
 
 local function GetBestSeed()
+    if not ShecklesCount then return "Carrot" end
+    
     local money = ShecklesCount.Value
     local bestSeed = "Carrot"
     
@@ -281,7 +327,7 @@ end
 
 --// Enhanced Main Functions
 local function BuySeeds()
-    if not GameEvents then return false end
+    if not GameEvents or not ShecklesCount then return false end
     
     local bestSeed = GetBestSeed()
     local money = ShecklesCount.Value
@@ -513,6 +559,11 @@ local function EnhancedAutoLoop()
                 if not AutoEnabled then break end
                 
                 -- อัพเดทข้อมูล
+                if not ShecklesCount then 
+                    StatusLabel.Text = "❌ Money stat not found!"
+                    break 
+                end
+                
                 local money = ShecklesCount.Value
                 local crops = GetCropCount()
                 local harvestableCrops = GetHarvestableCrops()
@@ -620,11 +671,13 @@ end)
 -- Status updater
 task.spawn(function()
     while task.wait(1) do
-        if not AutoEnabled then
+        if not AutoEnabled and ShecklesCount then
             local money = ShecklesCount.Value
             local crops = GetCropCount()
             local harvestableCrops = GetHarvestableCrops()
-            InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
+            InfoLabel.Text = `💰 ${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
+        elseif not ShecklesCount then
+            InfoLabel.Text = "❌ Waiting for game to load..."
         end
     end
 end)
@@ -634,3 +687,8 @@ print("🌟 Enhanced Auto-Farm loaded successfully!")
 print("✨ Features: Smart warp, auto-sell when needed, improved planting!")
 print("🎮 Click the button to start enhanced farming!")
 print("🔧 FIXED: Button hanging issue resolved!")
+print("⏳ Waiting for game to fully load...")
+
+-- Show loading status
+StatusLabel.Text = "⏳ Loading game data..."
+InfoLabel.Text = "Please wait..."
