@@ -1,11 +1,11 @@
 --[[
-    @author Enhanced Auto-Farm for Grow a Garden - LINE 1 ERROR FIXED
-    @description Fixed version with proper initialization order
+    @author Enhanced Auto-Farm for Grow a Garden - PLAYER READY FIXED
+    @description Fixed version with better player loading detection
     https://www.roblox.com/games/126884695634066
 ]]
 
 -- Wait for game to load completely before doing anything
-task.wait(5)
+task.wait(3)
 
 -- Check if we're in the right environment
 if not game or not game.GetService then
@@ -46,63 +46,157 @@ if not LocalPlayer then
     return
 end
 
--- Wait for player to fully load
+-- Simplified player ready function with better error handling
 local function WaitForPlayerReady()
     print("⏳ Waiting for player to be ready...")
     
-    -- Wait for character
-    local Character = LocalPlayer.CharacterAdded:Wait()
-    local Humanoid = Character:WaitForChild("Humanoid", 10)
-    local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart", 10)
+    -- Step 1: Wait for character with timeout
+    print("1/4 Waiting for character...")
+    local Character = LocalPlayer.Character
+    local attempts = 0
+    local maxAttempts = 30
     
-    if not Humanoid or not HumanoidRootPart then
-        error("Character components not loaded properly")
-        return false
+    while not Character and attempts < maxAttempts do
+        attempts = attempts + 1
+        print(`Character attempt {attempts}/{maxAttempts}`)
+        task.wait(1)
+        Character = LocalPlayer.Character
     end
     
-    -- Wait for backpack
-    local Backpack = LocalPlayer:WaitForChild("Backpack", 10)
+    if not Character then
+        print("❌ Character not found, trying to spawn...")
+        -- Try to respawn
+        if LocalPlayer.CharacterAdded then
+            Character = LocalPlayer.CharacterAdded:Wait()
+        else
+            error("Could not get character")
+            return false
+        end
+    end
+    
+    print("✅ Character found!")
+    
+    -- Step 2: Wait for essential character parts
+    print("2/4 Waiting for character components...")
+    local Humanoid = Character:WaitForChild("Humanoid", 15)
+    local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart", 15)
+    
+    if not Humanoid then
+        print("⚠️ Humanoid not found, continuing anyway...")
+    else
+        print("✅ Humanoid found!")
+    end
+    
+    if not HumanoidRootPart then
+        print("⚠️ HumanoidRootPart not found, continuing anyway...")
+    else
+        print("✅ HumanoidRootPart found!")
+    end
+    
+    -- Step 3: Wait for backpack (optional)
+    print("3/4 Checking backpack...")
+    local Backpack = LocalPlayer:FindFirstChild("Backpack")
     if not Backpack then
-        error("Backpack not found")
-        return false
+        print("⚠️ Backpack not found, creating wait...")
+        Backpack = LocalPlayer:WaitForChild("Backpack", 10)
     end
     
-    -- Wait for leaderstats
-    local Leaderstats = LocalPlayer:WaitForChild("leaderstats", 15)
+    if Backpack then
+        print("✅ Backpack found!")
+    else
+        print("⚠️ Backpack not found, continuing anyway...")
+    end
+    
+    -- Step 4: Wait for leaderstats (most important for this game)
+    print("4/4 Waiting for leaderstats...")
+    local Leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+    attempts = 0
+    maxAttempts = 20
+    
+    while not Leaderstats and attempts < maxAttempts do
+        attempts = attempts + 1
+        print(`Leaderstats attempt {attempts}/{maxAttempts}`)
+        task.wait(1)
+        Leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+    end
+    
     if not Leaderstats then
-        error("Leaderstats not found - wrong game or not loaded")
+        print("❌ Leaderstats not found - checking if we're in the right game...")
+        print("Available PlayerGui children:")
+        for _, child in pairs(LocalPlayer:GetChildren()) do
+            print(`  - {child.Name} ({child.ClassName})`)
+        end
+        
+        -- Try alternative locations for stats
+        local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if PlayerGui then
+            print("Checking PlayerGui for stats...")
+            for _, gui in pairs(PlayerGui:GetChildren()) do
+                print(`  GUI: {gui.Name}`)
+                for _, child in pairs(gui:GetChildren()) do
+                    if child.Name:lower():find("money") or child.Name:lower():find("cash") or child.Name:lower():find("sheckle") then
+                        print(`  Found potential money element: {child.Name}`)
+                    end
+                end
+            end
+        end
+        
+        error("Could not find leaderstats - make sure you're in the correct game")
         return false
     end
     
+    print("✅ Leaderstats found!")
     print("✅ Player ready!")
     return true, Character, Backpack, Leaderstats
 end
 
--- Initialize player components
+-- Initialize player components with better error handling
 local playerReady, Character, Backpack, Leaderstats = WaitForPlayerReady()
 if not playerReady then
     return
 end
 
--- Find money stat with extensive search
+-- Find money stat with extensive search and better debugging
 local function FindMoneyStat(leaderstats)
+    print("🔍 Searching for money stat...")
+    
     local possibleNames = {
         "Sheckles", "Money", "Cash", "Coins", "Currency", 
-        "Dollars", "Gold", "Credits", "Points", "Funds"
+        "Dollars", "Gold", "Credits", "Points", "Funds", "Sheckle"
     }
     
+    -- First try exact matches
     for _, name in pairs(possibleNames) do
         local stat = leaderstats:FindFirstChild(name)
         if stat then
-            print(`💰 Found money stat: {name}`)
+            print(`💰 Found exact match: {name} = {stat.Value}`)
             return stat
         end
     end
     
-    -- If not found, list all available stats
-    print("❌ Money stat not found. Available stats:")
+    -- Then try partial matches
     for _, child in pairs(leaderstats:GetChildren()) do
-        print(`  - {child.Name} ({child.ClassName})`)
+        local childName = child.Name:lower()
+        for _, possibleName in pairs(possibleNames) do
+            if childName:find(possibleName:lower()) then
+                print(`💰 Found partial match: {child.Name} = {child.Value}`)
+                return child
+            end
+        end
+    end
+    
+    -- If still not found, show all available stats
+    print("❌ Money stat not found. Available leaderstats:")
+    for _, child in pairs(leaderstats:GetChildren()) do
+        print(`  - {child.Name} ({child.ClassName}) = {child.Value}`)
+    end
+    
+    -- Try to use the first IntValue or NumberValue as money
+    for _, child in pairs(leaderstats:GetChildren()) do
+        if child:IsA("IntValue") or child:IsA("NumberValue") then
+            print(`💰 Using first numeric value as money: {child.Name}`)
+            return child
+        end
     end
     
     return nil
@@ -110,63 +204,103 @@ end
 
 local ShecklesCount = FindMoneyStat(Leaderstats)
 if not ShecklesCount then
-    error("Could not find money stat in leaderstats")
+    error("Could not find any money stat in leaderstats")
     return
 end
 
--- Game structure detection with multiple retries
+-- Game structure detection with more patience
 local GameEvents = nil
 local Farms = nil
 
 local function DetectGameStructure()
     print("🔍 Detecting game structure...")
     
-    local maxAttempts = 5
+    local maxAttempts = 10
     local currentAttempt = 0
     
     while currentAttempt < maxAttempts and (not GameEvents or not Farms) do
         currentAttempt = currentAttempt + 1
-        print(`Attempt {currentAttempt}/{maxAttempts}`)
+        print(`Structure detection attempt {currentAttempt}/{maxAttempts}`)
         
-        -- Look for events folder
+        -- Look for events folder with more patience
         if not GameEvents then
-            local eventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents", "ServerEvents"}
+            local eventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents", "ServerEvents", "RE"}
             for _, folderName in pairs(eventFolders) do
                 local folder = ReplicatedStorage:FindFirstChild(folderName)
                 if folder then
                     GameEvents = folder
-                    print(`📁 Found events: {folderName}`)
+                    print(`📁 Found events folder: {folderName}`)
                     break
+                end
+            end
+            
+            -- Also check ReplicatedStorage children
+            if not GameEvents then
+                print("Checking ReplicatedStorage children:")
+                for _, child in pairs(ReplicatedStorage:GetChildren()) do
+                    print(`  - {child.Name} ({child.ClassName})`)
+                    if child:IsA("Folder") and (child.Name:lower():find("event") or child.Name:lower():find("remote")) then
+                        GameEvents = child
+                        print(`📁 Found events folder by pattern: {child.Name}`)
+                        break
+                    end
                 end
             end
         end
         
         -- Look for farms folder
         if not Farms then
-            local farmFolders = {"Farm", "Farms", "FarmPlots", "PlayerFarms", "Plots"}
+            local farmFolders = {"Farm", "Farms", "FarmPlots", "PlayerFarms", "Plots", "FarmFolder"}
             for _, folderName in pairs(farmFolders) do
                 local folder = game.Workspace:FindFirstChild(folderName)
                 if folder then
                     Farms = folder
-                    print(`🌾 Found farms: {folderName}`)
+                    print(`🌾 Found farms folder: {folderName}`)
                     break
+                end
+            end
+            
+            -- Also check workspace children
+            if not Farms then
+                print("Checking Workspace children for farms:")
+                for _, child in pairs(game.Workspace:GetChildren()) do
+                    if child:IsA("Folder") and child.Name:lower():find("farm") then
+                        Farms = child
+                        print(`🌾 Found farms folder by pattern: {child.Name}`)
+                        break
+                    end
                 end
             end
         end
         
         if not GameEvents or not Farms then
-            print("Waiting for game to load more...")
-            task.wait(2)
+            print("Waiting for more game components to load...")
+            task.wait(3)
         end
     end
     
     if GameEvents then
-        print("Available events:")
+        print("📋 Available events:")
         for _, event in pairs(GameEvents:GetChildren()) do
-            print(`  - {event.Name}`)
+            print(`  - {event.Name} ({event.ClassName})`)
         end
     else
         print("❌ No events folder found!")
+        print("📋 ReplicatedStorage children:")
+        for _, child in pairs(ReplicatedStorage:GetChildren()) do
+            print(`  - {child.Name} ({child.ClassName})`)
+        end
+    end
+    
+    if Farms then
+        print("📋 Farms folder found with children:")
+        for i, farm in pairs(Farms:GetChildren()) do
+            if i <= 3 then -- Only show first 3
+                print(`  - {farm.Name} ({farm.ClassName})`)
+            end
+        end
+    else
+        print("❌ No farms folder found!")
     end
     
     return GameEvents ~= nil and Farms ~= nil
@@ -175,7 +309,7 @@ end
 -- Detect game structure
 local detectionSuccess = DetectGameStructure()
 if not detectionSuccess then
-    warn("⚠️ Could not detect full game structure - some features may not work")
+    print("⚠️ Could not detect full game structure - script will continue with limited functionality")
 end
 
 -- Seed progression system
@@ -207,10 +341,16 @@ local function CreateSimpleGUI()
         ScreenGui.Parent = game.CoreGui
         
         local MainFrame = Instance.new("Frame")
-        MainFrame.Size = UDim2.new(0, 200, 0, 100)
+        MainFrame.Size = UDim2.new(0, 250, 0, 120)
         MainFrame.Position = UDim2.new(0, 10, 0, 10)
         MainFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        MainFrame.BorderSizePixel = 0
         MainFrame.Parent = ScreenGui
+        
+        -- Add rounded corners
+        local Corner = Instance.new("UICorner")
+        Corner.CornerRadius = UDim.new(0, 8)
+        Corner.Parent = MainFrame
         
         local ToggleButton = Instance.new("TextButton")
         ToggleButton.Size = UDim2.new(1, -10, 0, 30)
@@ -218,27 +358,45 @@ local function CreateSimpleGUI()
         ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
         ToggleButton.Text = "START AUTO FARM"
         ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleButton.TextScaled = true
+        ToggleButton.Font = Enum.Font.GothamBold
         ToggleButton.Parent = MainFrame
+        
+        local ButtonCorner = Instance.new("UICorner")
+        ButtonCorner.CornerRadius = UDim.new(0, 5)
+        ButtonCorner.Parent = ToggleButton
         
         local StatusLabel = Instance.new("TextLabel")
         StatusLabel.Size = UDim2.new(1, -10, 0, 20)
         StatusLabel.Position = UDim2.new(0, 5, 0, 40)
         StatusLabel.BackgroundTransparency = 1
-        StatusLabel.Text = "Ready to farm!"
+        StatusLabel.Text = "✅ Ready to farm!"
         StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         StatusLabel.TextScaled = true
+        StatusLabel.Font = Enum.Font.Gotham
         StatusLabel.Parent = MainFrame
         
         local InfoLabel = Instance.new("TextLabel")
         InfoLabel.Size = UDim2.new(1, -10, 0, 20)
         InfoLabel.Position = UDim2.new(0, 5, 0, 65)
         InfoLabel.BackgroundTransparency = 1
-        InfoLabel.Text = "Money: $0"
+        InfoLabel.Text = `💰 Money: $${ShecklesCount.Value}`
         InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
         InfoLabel.TextScaled = true
+        InfoLabel.Font = Enum.Font.Gotham
         InfoLabel.Parent = MainFrame
         
-        return ScreenGui, ToggleButton, StatusLabel, InfoLabel
+        local DebugLabel = Instance.new("TextLabel")
+        DebugLabel.Size = UDim2.new(1, -10, 0, 20)
+        DebugLabel.Position = UDim2.new(0, 5, 0, 90)
+        DebugLabel.BackgroundTransparency = 1
+        DebugLabel.Text = "🔧 Script loaded successfully"
+        DebugLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        DebugLabel.TextScaled = true
+        DebugLabel.Font = Enum.Font.Gotham
+        DebugLabel.Parent = MainFrame
+        
+        return ScreenGui, ToggleButton, StatusLabel, InfoLabel, DebugLabel
     end)
     
     if success then
@@ -249,7 +407,7 @@ local function CreateSimpleGUI()
     end
 end
 
-local ScreenGui, ToggleButton, StatusLabel, InfoLabel = CreateSimpleGUI()
+local ScreenGui, ToggleButton, StatusLabel, InfoLabel, DebugLabel = CreateSimpleGUI()
 if not ScreenGui then
     error("Could not create GUI")
     return
@@ -325,9 +483,9 @@ local function BuySeeds()
     end)
     
     if success then
-        StatusLabel.Text = "Bought seeds"
+        StatusLabel.Text = "🛒 Bought seeds"
     else
-        StatusLabel.Text = "Buy failed"
+        StatusLabel.Text = "❌ Buy failed"
     end
 end
 
@@ -353,9 +511,9 @@ local function PlantSeeds()
     end)
     
     if success then
-        StatusLabel.Text = "Planted seeds"
+        StatusLabel.Text = "🌱 Planted seeds"
     else
-        StatusLabel.Text = "Plant failed"
+        StatusLabel.Text = "❌ Plant failed"
     end
 end
 
@@ -385,11 +543,11 @@ local function HarvestCrops()
         end
         
         harvestInFolder(plantsPhysical)
-        StatusLabel.Text = `Harvested ${harvested} crops`
+        StatusLabel.Text = `🌾 Harvested {harvested} crops`
     end)
     
     if not success then
-        StatusLabel.Text = "Harvest failed"
+        StatusLabel.Text = "❌ Harvest failed"
     end
 end
 
@@ -412,9 +570,9 @@ local function SellCrops()
     end)
     
     if success then
-        StatusLabel.Text = "Sold crops"
+        StatusLabel.Text = "💰 Sold crops"
     else
-        StatusLabel.Text = "Sell failed"
+        StatusLabel.Text = "❌ Sell failed"
     end
 end
 
@@ -425,7 +583,11 @@ local function AutoFarmLoop()
             local success = pcall(function()
                 -- Update info
                 if ShecklesCount and InfoLabel then
-                    InfoLabel.Text = `Money: $${ShecklesCount.Value}`
+                    InfoLabel.Text = `💰 Money: $${ShecklesCount.Value}`
+                end
+                
+                if DebugLabel then
+                    DebugLabel.Text = `🔧 Seed: {GetBestSeed()}`
                 end
                 
                 -- Farm sequence
@@ -451,7 +613,7 @@ local function AutoFarmLoop()
             end)
             
             if not success then
-                StatusLabel.Text = "Error occurred"
+                StatusLabel.Text = "❌ Error occurred"
                 task.wait(2)
             end
         end
@@ -465,7 +627,7 @@ local function ToggleAutoFarm()
     if AutoEnabled then
         ToggleButton.Text = "STOP AUTO FARM"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        StatusLabel.Text = "Auto-farm started"
+        StatusLabel.Text = "🚀 Auto-farm started"
         
         if AutoLoopConnection then
             task.cancel(AutoLoopConnection)
@@ -474,7 +636,7 @@ local function ToggleAutoFarm()
     else
         ToggleButton.Text = "START AUTO FARM"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        StatusLabel.Text = "Auto-farm stopped"
+        StatusLabel.Text = "⏹️ Auto-farm stopped"
         
         if AutoLoopConnection then
             task.cancel(AutoLoopConnection)
@@ -494,18 +656,27 @@ if ToggleButton then
 end
 
 -- Success message
-print("🌟 Simple Auto-Farm loaded successfully!")
-print("🔧 Line 1 error fixed with proper initialization")
+print("🌟 Enhanced Auto-Farm loaded successfully!")
+print("🔧 Player ready issue fixed!")
 print("🎮 Click the button to start farming!")
+print(`💰 Current money: ${ShecklesCount.Value}`)
+print(`🌱 Best seed: {GetBestSeed()}`)
 
--- Keep the script alive
+-- Keep the script alive and update display
 while true do
-    task.wait(1)
+    task.wait(2)
     
     -- Update money display
     if ShecklesCount and InfoLabel and not AutoEnabled then
         local success = pcall(function()
-            InfoLabel.Text = `Money: $${ShecklesCount.Value}`
+            InfoLabel.Text = `💰 Money: $${ShecklesCount.Value}`
+        end)
+    end
+    
+    -- Update debug info
+    if DebugLabel and not AutoEnabled then
+        local success = pcall(function()
+            DebugLabel.Text = `🔧 Best seed: {GetBestSeed()}`
         end)
     end
 end
