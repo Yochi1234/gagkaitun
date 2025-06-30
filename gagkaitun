@@ -1,10 +1,12 @@
 --[[
     @author Grow a Garden - Auto to 300 Tomatoes (v3)
-    @description Auto-farm from scratch until you have 300 Tomato crops grown (faster + stable)
+    @description Auto-farm from scratch until you have 300 Tomato crops grown (farm detection fixed)
 ]]
 
+-- Wait for game to load completely before doing anything
 task.wait(3)
 
+-- Initialize services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -26,62 +28,57 @@ local function WaitForLeaderstats()
 end
 
 local Leaderstats = WaitForLeaderstats()
-if not Leaderstats then
-    print("❌ No leaderstats found, aborting.")
-    return
-end
+if not Leaderstats then print("❌ No leaderstats") return end
 
+-- Find Sheckles
 local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
-if not Sheckles then
-    print("❌ No money stat found, aborting.")
-    return
-end
+if not Sheckles then print("❌ No money stat") return end
 
+-- GameEvents detection
 local GameEvents = nil
 for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents"} do
     local folder = ReplicatedStorage:FindFirstChild(name)
-    if folder then
-        GameEvents = folder
-        break
-    end
+    if folder then GameEvents = folder break end
 end
-if not GameEvents then
-    print("❌ No GameEvents folder found, aborting.")
-    return
-end
+if not GameEvents then print("❌ No GameEvents folder found") return end
 
 print("📦 GameEvents folder: " .. GameEvents.Name)
 
+-- Get My Farm with wait and debug
 local function GetMyFarm()
-    for _, farm in Workspace:GetChildren() do
-        if farm:FindFirstChild("Important") then
-            local data = farm.Important:FindFirstChild("Data")
-            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
-                return farm
+    for _, child in pairs(Workspace:GetChildren()) do
+        if child:FindFirstChild("Important") then
+            local data = child.Important:FindFirstChild("Data")
+            if data then
+                local owner = data:FindFirstChild("Owner")
+                if owner then
+                    print("👀 Checking farm: " .. child.Name .. " | Owner: " .. owner.Value)
+                    if owner.Value == LocalPlayer.Name then
+                        print("✅ Found player farm: " .. child.Name)
+                        return child
+                    end
+                end
             end
         end
+    end
+    print("❌ No matching farm found")
+    return nil
+end
+
+local function WaitForMyFarm(timeout)
+    timeout = timeout or 20
+    local elapsed = 0
+    while elapsed < timeout do
+        local farm = GetMyFarm()
+        if farm then return farm end
+        task.wait(1)
+        elapsed += 1
+        print("⏳ Waiting for farm... (" .. elapsed .. "s)")
     end
     return nil
 end
 
-local function WaitForMyFarm(timeoutSeconds)
-    timeoutSeconds = timeoutSeconds or 20
-    local farm = GetMyFarm()
-    local waited = 0
-    while not farm and waited < timeoutSeconds do
-        task.wait(1)
-        waited = waited + 1
-        farm = GetMyFarm()
-        print("⏳ Waiting for farm... " .. waited .. "s")
-    end
-    if not farm then
-        warn("⚠️ No farm found after waiting " .. timeoutSeconds .. " seconds.")
-    else
-        print("✅ Farm found: " .. farm.Name)
-    end
-    return farm
-end
-
+-- Try buy seed and return success
 local function TryBuySeed(seedName)
     for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -90,20 +87,16 @@ local function TryBuySeed(seedName)
                 print("🛒 Buying seed: " .. seedName .. " via " .. evt)
                 event:FireServer(seedName)
             end)
-            if success then
-                return true
-            end
+            if success then return true end
         end
     end
     return false
 end
 
+-- Farming Functions
 local function PlantSeed(seedName)
-    local farm = GetMyFarm()
-    if not farm then
-        print("⚠️ No farm found to plant")
-        return
-    end
+    local farm = WaitForMyFarm()
+    if not farm then print("⚠️ No farm found") return end
     local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
     for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -116,11 +109,8 @@ local function PlantSeed(seedName)
 end
 
 local function Harvest()
-    local farm = GetMyFarm()
-    if not farm then
-        print("⚠️ No farm found to harvest")
-        return
-    end
+    local farm = WaitForMyFarm()
+    if not farm then return end
     local plants = farm.Important:FindFirstChild("Plants_Physical")
     if not plants then return end
     local count = 0
@@ -128,7 +118,7 @@ local function Harvest()
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
             fireproximityprompt(prompt)
-            task.wait(0.05)
+            task.wait(0.1)
             count += 1
         end
     end
@@ -140,7 +130,7 @@ local function Sell()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         char.HumanoidRootPart.CFrame = sellPos
-        task.wait(0.5)
+        task.wait(1)
     end
     for _, evt in {"SellInventory", "SellAll", "Sell", "Sell_Inventory"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -152,8 +142,9 @@ local function Sell()
     end
 end
 
+-- Count tomato plants
 local function CountTomato()
-    local farm = GetMyFarm()
+    local farm = WaitForMyFarm()
     if not farm then return 0 end
     local count = 0
     local plants = farm.Important:FindFirstChild("Plants_Physical")
@@ -167,14 +158,9 @@ local function CountTomato()
     return count
 end
 
-local function FarmToTomato300_Fast()
-    print("🚀 Starting Fast Auto-Farm to 300 Tomatoes...")
-    local farm = WaitForMyFarm(20)
-    if not farm then
-        print("❌ Farm not found, aborting.")
-        return
-    end
-    
+-- Main Loop
+local function FarmToTomato300()
+    print("🚀 Starting Auto-Farm to 300 Tomatoes...")
     while true do
         local tomatoes = CountTomato()
         print("🍅 Tomato Count: " .. tomatoes)
@@ -190,15 +176,26 @@ local function FarmToTomato300_Fast()
             TryBuySeed("Carrot")
         end
 
+        task.wait(0.25)
         PlantSeed(seedToUse)
-        task.wait(0.5)
-
+        task.wait(0.25)
         Harvest()
-        task.wait(0.5)
-
+        task.wait(0.25)
         Sell()
-        task.wait(1)
+        task.wait(0.5)
     end
 end
 
-FarmToTomato300_Fast()
+-- Start
+FarmToTomato300()
+
+-- GUI Notice
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "AutoFarmNotice"
+local label = Instance.new("TextLabel", gui)
+label.Size = UDim2.new(0.3, 0, 0.05, 0)
+label.Position = UDim2.new(0.35, 0, 0.05, 0)
+label.Text = "🌿 Tomato AutoFarm: Running..."
+label.TextScaled = true
+label.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+label.TextColor3 = Color3.new(1,1,1)
