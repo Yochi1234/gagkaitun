@@ -129,29 +129,24 @@ local function PlantSeed(seedName)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    local middle = GetFarmCenter(farm)
-    if not middle then
-        print("❌ ไม่สามารถหาตำแหน่งฟาร์มได้")
-        return
+  local function GetFarmCenter(farm)
+    if not farm then return nil end
+    -- เช็คว่า farm มี GetPivot() หรือไม่
+    if typeof(farm.GetPivot) == "function" then
+        return farm:GetPivot().Position
     end
-
-    hrp.CFrame = CFrame.new(middle + Vector3.new(0, 2, 0))
-    task.wait(0.1)
-
-    local planted = 0
-    for _, part in pairs(locations:GetChildren()) do
-        local pos = part.Position + Vector3.new(0, 0.13, 0)
-        for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
-            local event = GameEvents:FindFirstChild(evt)
-            if event then
-                event:FireServer(pos, seedName)
-                planted += 1
-                task.wait(0.05)
-                break
-            end
+    -- ถ้ามี PrimaryPart ใช้ได้เลย
+    if farm.PrimaryPart then
+        return farm.PrimaryPart.Position
+    end
+    -- ถ้า farm เป็น Folder หาหลักจาก BasePart ตัวแรก
+    for _, child in pairs(farm:GetChildren()) do
+        if child:IsA("BasePart") then
+            return child.Position
         end
-        if planted >= 20 then break end
     end
+    -- ถ้าหาไม่ได้เลย คืนค่า nil
+    return nil
 end
 
 -- Harvest
