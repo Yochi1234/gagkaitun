@@ -1,12 +1,10 @@
 --[[
-    @author Grow a Garden - Auto to 300 Tomatoes (v2)
-    @description Auto-farm from scratch until you have 300 Tomato crops grown
+    @author Grow a Garden - Auto to 300 Tomatoes (v3)
+    @description Auto-farm from scratch until you have 300 Tomato crops grown (faster + stable)
 ]]
 
--- Wait for game to load completely before doing anything
 task.wait(3)
 
--- Initialize services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -28,23 +26,32 @@ local function WaitForLeaderstats()
 end
 
 local Leaderstats = WaitForLeaderstats()
-if not Leaderstats then print("❌ No leaderstats") return end
+if not Leaderstats then
+    print("❌ No leaderstats found, aborting.")
+    return
+end
 
--- Find Sheckles
 local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
-if not Sheckles then print("❌ No money stat") return end
+if not Sheckles then
+    print("❌ No money stat found, aborting.")
+    return
+end
 
--- GameEvents detection
 local GameEvents = nil
 for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents"} do
     local folder = ReplicatedStorage:FindFirstChild(name)
-    if folder then GameEvents = folder break end
+    if folder then
+        GameEvents = folder
+        break
+    end
 end
-if not GameEvents then print("❌ No GameEvents folder found") return end
+if not GameEvents then
+    print("❌ No GameEvents folder found, aborting.")
+    return
+end
 
 print("📦 GameEvents folder: " .. GameEvents.Name)
 
--- Get My Farm
 local function GetMyFarm()
     for _, farm in Workspace:GetChildren() do
         if farm:FindFirstChild("Important") then
@@ -57,7 +64,24 @@ local function GetMyFarm()
     return nil
 end
 
--- Try buy seed and return success
+local function WaitForMyFarm(timeoutSeconds)
+    timeoutSeconds = timeoutSeconds or 20
+    local farm = GetMyFarm()
+    local waited = 0
+    while not farm and waited < timeoutSeconds do
+        task.wait(1)
+        waited = waited + 1
+        farm = GetMyFarm()
+        print("⏳ Waiting for farm... " .. waited .. "s")
+    end
+    if not farm then
+        warn("⚠️ No farm found after waiting " .. timeoutSeconds .. " seconds.")
+    else
+        print("✅ Farm found: " .. farm.Name)
+    end
+    return farm
+end
+
 local function TryBuySeed(seedName)
     for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -66,16 +90,20 @@ local function TryBuySeed(seedName)
                 print("🛒 Buying seed: " .. seedName .. " via " .. evt)
                 event:FireServer(seedName)
             end)
-            if success then return true end
+            if success then
+                return true
+            end
         end
     end
     return false
 end
 
--- Farming Functions
 local function PlantSeed(seedName)
     local farm = GetMyFarm()
-    if not farm then print("⚠️ No farm found") return end
+    if not farm then
+        print("⚠️ No farm found to plant")
+        return
+    end
     local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
     for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -89,7 +117,10 @@ end
 
 local function Harvest()
     local farm = GetMyFarm()
-    if not farm then return end
+    if not farm then
+        print("⚠️ No farm found to harvest")
+        return
+    end
     local plants = farm.Important:FindFirstChild("Plants_Physical")
     if not plants then return end
     local count = 0
@@ -97,7 +128,7 @@ local function Harvest()
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
             fireproximityprompt(prompt)
-            task.wait(0.1)
+            task.wait(0.05)
             count += 1
         end
     end
@@ -109,7 +140,7 @@ local function Sell()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         char.HumanoidRootPart.CFrame = sellPos
-        task.wait(1)
+        task.wait(0.5)
     end
     for _, evt in {"SellInventory", "SellAll", "Sell", "Sell_Inventory"} do
         local event = GameEvents:FindFirstChild(evt)
@@ -121,7 +152,6 @@ local function Sell()
     end
 end
 
--- Count tomato plants
 local function CountTomato()
     local farm = GetMyFarm()
     if not farm then return 0 end
@@ -137,9 +167,14 @@ local function CountTomato()
     return count
 end
 
--- Main Loop
-local function FarmToTomato300()
-    print("🚀 Starting Auto-Farm to 300 Tomatoes...")
+local function FarmToTomato300_Fast()
+    print("🚀 Starting Fast Auto-Farm to 300 Tomatoes...")
+    local farm = WaitForMyFarm(20)
+    if not farm then
+        print("❌ Farm not found, aborting.")
+        return
+    end
+    
     while true do
         local tomatoes = CountTomato()
         print("🍅 Tomato Count: " .. tomatoes)
@@ -155,14 +190,15 @@ local function FarmToTomato300()
             TryBuySeed("Carrot")
         end
 
-        task.wait(1)
         PlantSeed(seedToUse)
-        task.wait(1)
+        task.wait(0.5)
+
         Harvest()
-        task.wait(1)
+        task.wait(0.5)
+
         Sell()
-        task.wait(2)
+        task.wait(1)
     end
 end
 
-FarmToTomato300()
+FarmToTomato300_Fast()
