@@ -1,5 +1,5 @@
 --[[
-    @author Grow a Garden - Auto to 300 Tomatoes
+    @author Grow a Garden - Auto to 300 Tomatoes (v2)
     @description Auto-farm from scratch until you have 300 Tomato crops grown
 ]]
 
@@ -12,8 +12,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Validate player
 if not LocalPlayer then return end
+if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
 
 -- Wait for leaderstats
 local function WaitForLeaderstats()
@@ -28,22 +28,21 @@ local function WaitForLeaderstats()
 end
 
 local Leaderstats = WaitForLeaderstats()
-if not Leaderstats then
-    warn("No leaderstats")
-    return
-end
+if not Leaderstats then print("❌ No leaderstats") return end
 
 -- Find Sheckles
 local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
-if not Sheckles then warn("No money stat") return end
+if not Sheckles then print("❌ No money stat") return end
 
 -- GameEvents detection
 local GameEvents = nil
-for _, name in {"GameEvents", "Events", "Remotes"} do
+for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents"} do
     local folder = ReplicatedStorage:FindFirstChild(name)
     if folder then GameEvents = folder break end
 end
-if not GameEvents then warn("No GameEvents") return end
+if not GameEvents then print("❌ No GameEvents folder found") return end
+
+print("📦 GameEvents folder: " .. GameEvents.Name)
 
 -- Get My Farm
 local function GetMyFarm()
@@ -60,19 +59,24 @@ end
 
 -- Farming Functions
 local function BuySeed(seedName)
-    for _, evt in {"BuySeed", "BuySeedStock"} do
+    for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
         local event = GameEvents:FindFirstChild(evt)
-        if event then event:FireServer(seedName) break end
+        if event then
+            print("🛒 Buying seed: " .. seedName .. " via " .. evt)
+            event:FireServer(seedName)
+            break
+        end
     end
 end
 
 local function PlantSeed(seedName)
     local farm = GetMyFarm()
-    if not farm then return end
+    if not farm then print("⚠️ No farm found") return end
     local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
     for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
         local event = GameEvents:FindFirstChild(evt)
         if event then
+            print("🌱 Planting " .. seedName .. " via " .. evt)
             event:FireServer(Vector3.new(pos.X, pos.Y, pos.Z), seedName)
             break
         end
@@ -84,14 +88,16 @@ local function Harvest()
     if not farm then return end
     local plants = farm.Important:FindFirstChild("Plants_Physical")
     if not plants then return end
-
+    local count = 0
     for _, crop in pairs(plants:GetChildren()) do
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
             fireproximityprompt(prompt)
             task.wait(0.1)
+            count += 1
         end
     end
+    print("🌾 Harvested " .. count .. " crops")
 end
 
 local function Sell()
@@ -101,9 +107,13 @@ local function Sell()
         char.HumanoidRootPart.CFrame = sellPos
         task.wait(1)
     end
-    for _, evt in {"SellInventory", "SellAll"} do
+    for _, evt in {"SellInventory", "SellAll", "Sell", "Sell_Inventory"} do
         local event = GameEvents:FindFirstChild(evt)
-        if event then event:FireServer() break end
+        if event then
+            print("💰 Selling crops via " .. evt)
+            event:FireServer()
+            break
+        end
     end
 end
 
@@ -125,15 +135,17 @@ end
 
 -- Main Loop
 local function FarmToTomato300()
+    print("🚀 Starting Auto-Farm to 300 Tomatoes...")
     while true do
         local tomatoes = CountTomato()
+        print("🍅 Tomato Count: " .. tomatoes)
         if tomatoes >= 300 then
             print("✅ Reached 300 Tomato plants!")
             break
         end
 
-        -- Step 1: Buy carrot if broke
         if Sheckles.Value < 30 then
+            print("💸 Low money, farming carrot...")
             BuySeed("Carrot")
             task.wait(1)
             PlantSeed("Carrot")
@@ -143,15 +155,11 @@ local function FarmToTomato300()
             Sell()
             task.wait(2)
         else
-            -- Step 2: Buy tomato if enough money
-            if Sheckles.Value >= 25 then
-                BuySeed("Tomato")
-                task.wait(1)
-                PlantSeed("Tomato")
-                task.wait(1)
-            end
-
-            -- Step 3: Harvest and sell
+            print("💰 Farming tomato...")
+            BuySeed("Tomato")
+            task.wait(1)
+            PlantSeed("Tomato")
+            task.wait(1)
             Harvest()
             task.wait(1)
             Sell()
@@ -160,5 +168,4 @@ local function FarmToTomato300()
     end
 end
 
--- Start farming
 FarmToTomato300()
