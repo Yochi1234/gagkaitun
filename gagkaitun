@@ -1,12 +1,10 @@
 --[[
-    @author Grow a Garden - Auto to 300 Tomatoes (v3.1)
-    @description Auto-farm from scratch until you have 300 Tomato crops grown (improved farm detection)
+    @author Enhanced Auto-Farm for Grow a Garden
+    @description From 0 to 300 Tomatoes, with fallback to Carrot and robust farm/harvest logic
 ]]
 
--- Wait for game to load completely before doing anything
 task.wait(3)
 
--- Initialize services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -17,8 +15,7 @@ if not LocalPlayer.Character then LocalPlayer.CharacterAdded:Wait() end
 
 -- Wait for leaderstats
 local function WaitForLeaderstats()
-    local stats = LocalPlayer:FindFirstChild("leaderstats")
-    local tries = 0
+    local stats, tries = LocalPlayer:FindFirstChild("leaderstats"), 0
     while not stats and tries < 30 do
         stats = LocalPlayer:FindFirstChild("leaderstats")
         tries += 1
@@ -28,168 +25,144 @@ local function WaitForLeaderstats()
 end
 
 local Leaderstats = WaitForLeaderstats()
-if not Leaderstats then print("❌ No leaderstats") return end
+if not Leaderstats then return print("❌ No leaderstats") end
 
--- Find Sheckles
 local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
-if not Sheckles then print("❌ No money stat") return end
+if not Sheckles then return print("❌ No Sheckles or Money") end
 
--- GameEvents detection
-local GameEvents = nil
+-- GameEvents
+local GameEvents
 for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents"} do
-    local folder = ReplicatedStorage:FindFirstChild(name)
-    if folder then GameEvents = folder break end
+    local g = ReplicatedStorage:FindFirstChild(name)
+    if g then GameEvents = g break end
 end
-if not GameEvents then print("❌ No GameEvents folder found") return end
+if not GameEvents then return print("❌ GameEvents not found") end
 
-print("📦 GameEvents folder: " .. GameEvents.Name)
-
--- Improved Get My Farm with flexible name matching
+-- Get my farm
 local function GetMyFarm()
-    for _, child in pairs(Workspace:GetDescendants()) do
-        if child:IsA("Model") and child:FindFirstChild("Important") then
-            local data = child.Important:FindFirstChild("Data")
-            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
-                print("✅ Found player farm: " .. child.Name)
-                return child
+    for _, v in Workspace:GetDescendants() do
+        if v:FindFirstChild("Important") and v:FindFirstChild("Important"):FindFirstChild("Data") then
+            local owner = v.Important.Data:FindFirstChild("Owner")
+            if owner and owner.Value == LocalPlayer.Name then
+                return v
             end
         end
     end
-    print("❌ No matching farm found")
-    return nil
 end
 
 local function WaitForMyFarm(timeout)
     timeout = timeout or 20
-    local elapsed = 0
-    while elapsed < timeout do
-        local farm = GetMyFarm()
-        if farm then return farm end
+    local t = 0
+    while t < timeout do
+        local f = GetMyFarm()
+        if f then return f end
         task.wait(1)
-        elapsed += 1
-        print("⏳ Waiting for farm... (" .. elapsed .. "s)")
+        t += 1
     end
     return nil
 end
 
--- Try buy seed and return success
-local function TryBuySeed(seedName)
-    for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
-        local event = GameEvents:FindFirstChild(evt)
-        if event then
-            local success = pcall(function()
-                print("🛒 Buying seed: " .. seedName .. " via " .. evt)
-                event:FireServer(seedName)
-            end)
-            if success then return true end
+-- Try buy seed
+local function TryBuySeed(seed)
+    for _, e in {"BuySeedStock", "BuySeed", "BuySeeds"} do
+        local evt = GameEvents:FindFirstChild(e)
+        if evt then
+            local ok = pcall(function() evt:FireServer(seed) end)
+            if ok then return true end
         end
     end
     return false
 end
 
--- Farming Functions
-local function PlantSeed(seedName)
+-- Planting
+local function PlantSeed(seed)
     local farm = WaitForMyFarm()
-    if not farm then print("⚠️ No farm found") return end
-    local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
-    for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
-        local event = GameEvents:FindFirstChild(evt)
-        if event then
-            print("🌱 Planting " .. seedName .. " via " .. evt)
-            event:FireServer(Vector3.new(pos.X, pos.Y, pos.Z), seedName)
+    if not farm then return end
+    local base = farm.Important:FindFirstChild("Plant_Locations")
+    if not base then return end
+    local land = base:GetChildren()[1]
+    if not land then return end
+
+    local pos = land.Position + Vector3.new(0, 0.1, 0)
+    for _, e in {"Plant_RE", "Plant", "PlantSeed"} do
+        local evt = GameEvents:FindFirstChild(e)
+        if evt then
+            evt:FireServer(pos, seed)
             break
         end
     end
 end
 
+-- Harvest
 local function Harvest()
     local farm = WaitForMyFarm()
     if not farm then return end
-    local plants = farm.Important:FindFirstChild("Plants_Physical")
-    if not plants then return end
-    local count = 0
-    for _, crop in pairs(plants:GetChildren()) do
+    local physical = farm.Important:FindFirstChild("Plants_Physical")
+    if not physical then return end
+
+    for _, crop in pairs(physical:GetChildren()) do
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
-            fireproximityprompt(prompt)
-            task.wait(0.05)
-            count += 1
+            for _ = 1, 2 do
+                pcall(function() fireproximityprompt(prompt) end)
+                task.wait(0.05)
+            end
         end
     end
-    print("🌾 Harvested " .. count .. " crops")
 end
 
+-- Sell
 local function Sell()
     local sellPos = CFrame.new(62, 4, -26)
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        char.HumanoidRootPart.CFrame = sellPos
-        task.wait(0.3)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = sellPos
+        task.wait(0.25)
     end
-    for _, evt in {"SellInventory", "SellAll", "Sell", "Sell_Inventory"} do
-        local event = GameEvents:FindFirstChild(evt)
-        if event then
-            print("💰 Selling crops via " .. evt)
-            event:FireServer()
-            break
-        end
+
+    for _, e in {"SellInventory", "Sell_Inventory", "Sell"} do
+        local evt = GameEvents:FindFirstChild(e)
+        if evt then evt:FireServer() break end
     end
 end
 
--- Count tomato plants
-local function CountTomato()
+-- Count tomatoes
+local function CountTomatoes()
     local farm = WaitForMyFarm()
     if not farm then return 0 end
-    local count = 0
-    local plants = farm.Important:FindFirstChild("Plants_Physical")
-    if plants then
-        for _, crop in pairs(plants:GetChildren()) do
-            if crop.Name == "Tomato" then
-                count += 1
-            end
+    local count, physical = 0, farm.Important:FindFirstChild("Plants_Physical")
+    if physical then
+        for _, crop in pairs(physical:GetChildren()) do
+            if crop.Name == "Tomato" then count += 1 end
         end
     end
     return count
 end
 
--- Main Loop
-local function FarmToTomato300()
-    print("🚀 Starting Auto-Farm to 300 Tomatoes...")
+-- Main loop
+local function FarmTo300Tomatoes()
+    print("🚀 Starting tomato farm to 300...")
     while true do
-        local tomatoes = CountTomato()
-        print("🍅 Tomato Count: " .. tomatoes)
-        if tomatoes >= 300 then
-            print("✅ Reached 300 Tomato plants!")
+        local tomatoCount = CountTomatoes()
+        print("🍅 Tomato count: " .. tomatoCount)
+        if tomatoCount >= 300 then
+            print("✅ Goal reached: 300 Tomatoes!")
             break
         end
 
-        local seedToUse = "Tomato"
-        if Sheckles.Value < 30 or not TryBuySeed("Tomato") then
-            print("🔄 Tomato unavailable or low money, using Carrot...")
-            seedToUse = "Carrot"
+        local seed = "Tomato"
+        if Sheckles.Value < 35 or not TryBuySeed("Tomato") then
+            seed = "Carrot"
             TryBuySeed("Carrot")
         end
 
-        task.wait(0.1)
-        PlantSeed(seedToUse)
-        task.wait(0.1)
+        PlantSeed(seed)
+        task.wait(0.05)
         Harvest()
-        task.wait(0.1)
+        task.wait(0.05)
         Sell()
-        task.wait(0.2)
+        task.wait(0.15)
     end
 end
 
--- Start
-FarmToTomato300()
-
--- GUI Notice
-local gui = Instance.new("ScreenGui", game.CoreGui)
-gui.Name = "AutoFarmNotice"
-local label = Instance.new("TextLabel", gui)
-label.Size = UDim2.new(0.3, 0, 0.05, 0)
-label.Position = UDim2.new(0.35, 0, 0.05, 0)
-label.Text = "🌿 Tomato AutoFarm: Running..."
-label.TextScaled = true
-label.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-label.TextColor3 = Color3.new(1,1,1)
+-- Start farming
+FarmTo300Tomatoes()
