@@ -1,6 +1,6 @@
 --[[
-    @author Simple Auto-Farm for Grow a Garden
-    @description One-button auto everything script
+    @author Enhanced Auto-Farm for Grow a Garden
+    @description Smart auto-farm with warp system and improved planting
     https://www.roblox.com/games/126884695634066
 ]]
 
@@ -8,6 +8,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Leaderstats = LocalPlayer.leaderstats
@@ -34,52 +35,99 @@ local SeedProgression = {
 --// Global Variables
 local IsRunning = false
 local AutoEnabled = false
+local MAX_BACKPACK_SIZE = 20
+local MIN_CROPS_TO_SELL = 3
 
---// Simple GUI
+--// Warp Positions
+local WarpPositions = {
+    Sell = CFrame.new(62, 4, -26),
+    Shop = CFrame.new(0, 4, 0), -- ปรับตำแหน่งตามร้านค้าจริง
+    Farm = nil -- จะถูกตั้งค่าเมื่อเจอฟาร์ม
+}
+
+--// Enhanced GUI
 local ScreenGui = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
 local ToggleButton = Instance.new("TextButton")
 local StatusLabel = Instance.new("TextLabel")
+local InfoLabel = Instance.new("TextLabel")
 
-ScreenGui.Name = "AutoFarmGUI"
+ScreenGui.Name = "EnhancedAutoFarmGUI"
 ScreenGui.Parent = game.CoreGui
 
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 MainFrame.BorderSizePixel = 0
 MainFrame.Position = UDim2.new(0, 10, 0, 10)
-MainFrame.Size = UDim2.new(0, 200, 0, 100)
+MainFrame.Size = UDim2.new(0, 220, 0, 130)
 
 local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
+corner.CornerRadius = UDim.new(0, 10)
 corner.Parent = MainFrame
+
+-- Add shadow effect
+local shadow = Instance.new("Frame")
+shadow.Name = "Shadow"
+shadow.Parent = ScreenGui
+shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+shadow.BackgroundTransparency = 0.7
+shadow.BorderSizePixel = 0
+shadow.Position = UDim2.new(0, 12, 0, 12)
+shadow.Size = UDim2.new(0, 220, 0, 130)
+shadow.ZIndex = -1
+
+local shadowCorner = Instance.new("UICorner")
+shadowCorner.CornerRadius = UDim.new(0, 10)
+shadowCorner.Parent = shadow
 
 ToggleButton.Name = "ToggleButton"
 ToggleButton.Parent = MainFrame
-ToggleButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
-ToggleButton.Position = UDim2.new(0.1, 0, 0.2, 0)
-ToggleButton.Size = UDim2.new(0.8, 0, 0.4, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(46, 125, 50)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.15, 0)
+ToggleButton.Size = UDim2.new(0.9, 0, 0.35, 0)
 ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.Text = "🚀 START AUTO"
+ToggleButton.Text = "🚀 START ENHANCED AUTO"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.TextScaled = true
 
 local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 6)
+toggleCorner.CornerRadius = UDim.new(0, 8)
 toggleCorner.Parent = ToggleButton
 
 StatusLabel.Name = "StatusLabel"
 StatusLabel.Parent = MainFrame
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Position = UDim2.new(0.1, 0, 0.7, 0)
-StatusLabel.Size = UDim2.new(0.8, 0, 0.2, 0)
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.Text = "Ready to start!"
-StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.Position = UDim2.new(0.05, 0, 0.55, 0)
+StatusLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
+StatusLabel.Font = Enum.Font.GothamMedium
+StatusLabel.Text = "🌱 Ready to farm!"
+StatusLabel.TextColor3 = Color3.fromRGB(76, 175, 80)
 StatusLabel.TextScaled = true
 
---// Utility Functions
+InfoLabel.Name = "InfoLabel"
+InfoLabel.Parent = MainFrame
+InfoLabel.BackgroundTransparency = 1
+InfoLabel.Position = UDim2.new(0.05, 0, 0.75, 0)
+InfoLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
+InfoLabel.Font = Enum.Font.Gotham
+InfoLabel.Text = "💰 $0 | 📦 0 crops"
+InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+InfoLabel.TextScaled = true
+
+--// Enhanced Utility Functions
+local function SmoothWarp(targetCFrame, speed)
+    local Character = LocalPlayer.Character
+    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local HumanoidRootPart = Character.HumanoidRootPart
+    local startCFrame = HumanoidRootPart.CFrame
+    
+    -- Instant warp for better performance
+    HumanoidRootPart.CFrame = targetCFrame
+    wait(0.2)
+end
+
 local function GetBestSeed()
     local money = ShecklesCount.Value
     local bestSeed = "Carrot"
@@ -97,18 +145,14 @@ end
 
 local function GetMyFarm()
     for _, Farm in pairs(Farms:GetChildren()) do
-        local Owner = Farm.Important.Data.Owner.Value
-        if Owner == LocalPlayer.Name then
-            return Farm
+        if Farm:FindFirstChild("Important") and Farm.Important:FindFirstChild("Data") then
+            local Owner = Farm.Important.Data:FindFirstChild("Owner")
+            if Owner and Owner.Value == LocalPlayer.Name then
+                -- Set farm warp position
+                WarpPositions.Farm = Farm:GetPivot() * CFrame.new(0, 5, 0)
+                return Farm
+            end
         end
-    end
-end
-
-local function TeleportToSell()
-    local Character = LocalPlayer.Character
-    if Character then
-        Character:PivotTo(CFrame.new(62, 4, -26))
-        wait(0.3)
     end
 end
 
@@ -158,38 +202,85 @@ local function GetCropCount()
     return count
 end
 
---// Main Functions
-local function BuySeeds()
-    local bestSeed = GetBestSeed()
-    local money = ShecklesCount.Value
+local function GetHarvestableCrops()
+    local myFarm = GetMyFarm()
+    if not myFarm then return 0 end
     
-    -- Calculate how many we can afford
-    local seedData
-    for _, seed in pairs(SeedProgression) do
-        if seed.name == bestSeed then
-            seedData = seed
-            break
+    local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
+    if not plantsPhysical then return 0 end
+    
+    local count = 0
+    local function countInFolder(folder)
+        for _, plant in pairs(folder:GetChildren()) do
+            local fruits = plant:FindFirstChild("Fruits")
+            if fruits then
+                countInFolder(fruits)
+            end
+            
+            local prompt = plant:FindFirstChild("ProximityPrompt", true)
+            if prompt and prompt.Enabled then
+                count = count + 1
+            end
         end
     end
     
-    if seedData then
-        local canBuy = math.floor(money / seedData.price)
-        if canBuy > 0 then
-            local buyAmount = math.min(canBuy, 20) -- Limit to prevent lag
+    countInFolder(plantsPhysical)
+    return count
+end
+
+local function IsBackpackFull()
+    return GetCropCount() >= MAX_BACKPACK_SIZE
+end
+
+local function ShouldSell()
+    local cropCount = GetCropCount()
+    local harvestableCrops = GetHarvestableCrops()
+    
+    -- ขายเมื่อกระเป๋าเต็มหรือไม่มีผลให้เก็บแล้วและมีของในกระเป๋า
+    return IsBackpackFull() or (harvestableCrops == 0 and cropCount >= MIN_CROPS_TO_SELL)
+end
+
+--// Enhanced Main Functions
+local function BuySeeds()
+    local bestSeed = GetBestSeed()
+    local money = ShecklesCount.Value
+    local ownedSeeds = GetOwnedSeeds()
+    local currentSeedCount = ownedSeeds[bestSeed] and ownedSeeds[bestSeed].count or 0
+    
+    -- ซื้อเมล็ดพันธุ์เมื่อมีเงินและเมล็ดพันธุ์น้อย
+    if currentSeedCount < 10 then
+        local seedData
+        for _, seed in pairs(SeedProgression) do
+            if seed.name == bestSeed then
+                seedData = seed
+                break
+            end
+        end
+        
+        if seedData and money >= seedData.price then
+            local canBuy = math.floor(money / seedData.price)
+            local buyAmount = math.min(canBuy, 15) -- จำกัดการซื้อ
+            
+            StatusLabel.Text = "🛒 Buying seeds..."
+            
             for i = 1, buyAmount do
                 GameEvents.BuySeedStock:FireServer(bestSeed)
                 wait(0.1)
             end
-            StatusLabel.Text = `Bought {buyAmount} {bestSeed}`
+            
+            StatusLabel.Text = `✅ Bought {buyAmount} {bestSeed}`
+            wait(1)
         end
     end
 end
 
-local function PlantSeeds()
+local function SmartPlant()
     local myFarm = GetMyFarm()
     if not myFarm then return end
     
-    local plantLocations = myFarm.Important.Plant_Locations
+    local plantLocations = myFarm.Important:FindFirstChild("Plant_Locations")
+    if not plantLocations then return end
+    
     local farmLands = plantLocations:GetChildren()
     if #farmLands == 0 then return end
     
@@ -199,161 +290,182 @@ local function PlantSeeds()
     
     if not seedData or seedData.count <= 0 then return end
     
-    -- Equip the tool
+    StatusLabel.Text = "🌱 Smart planting..."
+    
+    -- วาร์ปไปฟาร์ม
+    if WarpPositions.Farm then
+        SmoothWarp(WarpPositions.Farm)
+    end
+    
+    -- Equip tool
     local Character = LocalPlayer.Character
     if Character and seedData.tool.Parent == Backpack then
         Character.Humanoid:EquipTool(seedData.tool)
+        wait(0.5)
     end
     
-    -- Plant in random locations
+    -- ปลูกในตำแหน่งที่เหมาะสม
     local farmLand = farmLands[1]
     local center = farmLand:GetPivot()
     local size = farmLand.Size
     
-    for i = 1, math.min(seedData.count, 15) do
-        local x = center.X + math.random(-size.X/2, size.X/2)
-        local z = center.Z + math.random(-size.Z/2, size.Z/2)
+    local plantCount = math.min(seedData.count, 12)
+    local spacing = 4 -- ระยะห่างระหว่างต้นพืช
+    
+    for i = 1, plantCount do
+        -- คำนวณตำแหน่งแบบกริด
+        local row = math.floor((i - 1) / 4)
+        local col = (i - 1) % 4
+        
+        local x = center.X + (col - 1.5) * spacing
+        local z = center.Z + (row - 1.5) * spacing
         local position = Vector3.new(x, 0.13, z)
         
-        GameEvents.Plant_RE:FireServer(position, bestSeed)
-        wait(0.2)
+        -- ตรวจสอบว่าตำแหน่งอยู่ในฟาร์ม
+        if math.abs(x - center.X) <= size.X/2 and math.abs(z - center.Z) <= size.Z/2 then
+            GameEvents.Plant_RE:FireServer(position, bestSeed)
+            wait(0.3)
+        end
     end
     
-    StatusLabel.Text = `Planted {bestSeed} seeds`
+    StatusLabel.Text = `✅ Planted {plantCount} {bestSeed}`
 end
 
-local function HarvestCrops()
+local function SmartHarvest()
     local myFarm = GetMyFarm()
     if not myFarm then return end
     
-    local plantsPhysical = myFarm.Important.Plants_Physical
-    local harvestedCount = 0
+    local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
+    if not plantsPhysical then return end
     
-    local function harvestInFolder(folder)
+    StatusLabel.Text = "🌾 Harvesting crops..."
+    
+    -- วาร์ปไปฟาร์ม
+    if WarpPositions.Farm then
+        SmoothWarp(WarpPositions.Farm)
+    end
+    
+    local harvestedCount = 0
+    local targets = {}
+    
+    -- รวบรวมเป้าหมายทั้งหมด
+    local function collectTargets(folder)
         for _, plant in pairs(folder:GetChildren()) do
-            -- Check for fruits folder
             local fruits = plant:FindFirstChild("Fruits")
             if fruits then
-                harvestInFolder(fruits)
+                collectTargets(fruits)
             end
             
-            -- Try to harvest
             local prompt = plant:FindFirstChild("ProximityPrompt", true)
             if prompt and prompt.Enabled then
-                fireproximityprompt(prompt)
-                harvestedCount = harvestedCount + 1
-                wait(0.1)
+                table.insert(targets, {plant = plant, prompt = prompt})
             end
         end
     end
     
-    harvestInFolder(plantsPhysical)
+    collectTargets(plantsPhysical)
+    
+    -- เก็บเกี่ยวอย่างมีประสิทธิภาพ
+    for _, target in pairs(targets) do
+        if IsBackpackFull() then
+            break
+        end
+        
+        local plant = target.plant
+        local prompt = target.prompt
+        
+        -- เดินไปใกล้พืช
+        local Character = LocalPlayer.Character
+        if Character and Character:FindFirstChild("HumanoidRootPart") then
+            local plantPos = plant:GetPivot().Position
+            Character.HumanoidRootPart.CFrame = CFrame.new(plantPos + Vector3.new(0, 3, 0))
+            wait(0.2)
+        end
+        
+        -- เก็บเกี่ยว
+        if prompt.Enabled then
+            fireproximityprompt(prompt)
+            harvestedCount = harvestedCount + 1
+            wait(0.1)
+        end
+    end
     
     if harvestedCount > 0 then
-        StatusLabel.Text = `Harvested {harvestedCount} crops`
+        StatusLabel.Text = `✅ Harvested {harvestedCount} crops`
+    else
+        StatusLabel.Text = "⏳ No crops ready"
     end
 end
 
-local function SellCrops()
+local function SmartSell()
     local cropCount = GetCropCount()
-    if cropCount < 5 then return end
+    if cropCount < MIN_CROPS_TO_SELL then return end
+    
+    StatusLabel.Text = "💰 Selling crops..."
     
     local previousMoney = ShecklesCount.Value
-    TeleportToSell()
     
+    -- วาร์ปไปจุดขาย
+    SmoothWarp(WarpPositions.Sell)
+    
+    -- ขายหลายครั้งเพื่อให้แน่ใจ
     local attempts = 0
-    while attempts < 30 do
+    local maxAttempts = 20
+    
+    while attempts < maxAttempts and GetCropCount() > 0 do
         GameEvents.Sell_Inventory:FireServer()
-        wait(0.2)
+        wait(0.3)
         attempts = attempts + 1
         
+        -- หยุดถ้าเงินเพิ่มขึ้น (ขายสำเร็จ)
         if ShecklesCount.Value > previousMoney then
             break
         end
     end
     
-    StatusLabel.Text = `Sold crops! Money: ${ShecklesCount.Value}`
-end
-
-local function AutoWalk()
-    local myFarm = GetMyFarm()
-    if not myFarm then return end
-    
-    local Character = LocalPlayer.Character
-    if not Character then return end
-    
-    local plantsPhysical = myFarm.Important.Plants_Physical
-    local humanoid = Character.Humanoid
-    
-    -- Find harvestable plants
-    local targets = {}
-    local function findTargets(folder)
-        for _, plant in pairs(folder:GetChildren()) do
-            local fruits = plant:FindFirstChild("Fruits")
-            if fruits then
-                findTargets(fruits)
-            end
-            
-            local prompt = plant:FindFirstChild("ProximityPrompt", true)
-            if prompt and prompt.Enabled then
-                table.insert(targets, plant)
-            end
-        end
-    end
-    
-    findTargets(plantsPhysical)
-    
-    -- Move to targets
-    if #targets > 0 then
-        local target = targets[math.random(1, #targets)]
-        local position = target:GetPivot().Position
-        humanoid:MoveTo(position)
-        StatusLabel.Text = `Walking to {target.Name}`
+    local profit = ShecklesCount.Value - previousMoney
+    if profit > 0 then
+        StatusLabel.Text = `💰 Sold! +$${profit}`
     else
-        -- Move to random farm location
-        local plantLocations = myFarm.Important.Plant_Locations
-        local farmLands = plantLocations:GetChildren()
-        if #farmLands > 0 then
-            local farmLand = farmLands[math.random(1, #farmLands)]
-            local center = farmLand:GetPivot()
-            local size = farmLand.Size
-            local x = center.X + math.random(-size.X/2, size.X/2)
-            local z = center.Z + math.random(-size.Z/2, size.Z/2)
-            humanoid:MoveTo(Vector3.new(x, 4, z))
-            StatusLabel.Text = "Walking randomly"
-        end
+        StatusLabel.Text = "❌ Sell failed"
     end
+    
+    wait(1)
 end
 
---// Main Auto Loop
-local function AutoLoop()
+--// Enhanced Auto Loop
+local function EnhancedAutoLoop()
     while AutoEnabled do
         pcall(function()
-            -- 1. Buy seeds if we have money
-            if ShecklesCount.Value >= 10 then
-                BuySeeds()
+            -- อัพเดทข้อมูล
+            local money = ShecklesCount.Value
+            local crops = GetCropCount()
+            local harvestableCrops = GetHarvestableCrops()
+            
+            InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
+            
+            -- 1. ขายก่อนถ้าจำเป็น
+            if ShouldSell() then
+                SmartSell()
+                wait(2)
             end
             
-            wait(1)
+            -- 2. ซื้อเมล็ดพันธุ์
+            if money >= 50 then
+                BuySeeds()
+                wait(1)
+            end
             
-            -- 2. Plant seeds if we have any
-            PlantSeeds()
-            
-            wait(1)
-            
-            -- 3. Harvest crops
-            HarvestCrops()
-            
-            wait(1)
-            
-            -- 4. Sell if we have enough crops
-            SellCrops()
-            
+            -- 3. ปลูกพืช
+            SmartPlant()
             wait(2)
             
-            -- 5. Walk around
-            AutoWalk()
+            -- 4. เก็บเกี่ยว
+            SmartHarvest()
+            wait(2)
             
+            -- 5. พักสั้นๆ
+            StatusLabel.Text = "⏳ Waiting..."
             wait(3)
         end)
     end
@@ -365,36 +477,68 @@ local function ToggleAuto()
     
     if AutoEnabled then
         ToggleButton.Text = "🛑 STOP AUTO"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(85, 255, 85)
-        StatusLabel.Text = "Auto-farm started!"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(244, 67, 54)
+        StatusLabel.Text = "🚀 Enhanced auto-farm started!"
         
-        -- Start the auto loop
-        coroutine.wrap(AutoLoop)()
+        -- Start the enhanced auto loop
+        coroutine.wrap(EnhancedAutoLoop)()
     else
-        ToggleButton.Text = "🚀 START AUTO"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
-        StatusLabel.Text = "Auto-farm stopped!"
+        ToggleButton.Text = "🚀 START ENHANCED AUTO"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(46, 125, 50)
+        StatusLabel.Text = "⏹️ Auto-farm stopped!"
     end
 end
 
 --// Connect Events
 ToggleButton.MouseButton1Click:Connect(ToggleAuto)
 
--- Auto-start for new players (optional)
-if ShecklesCount.Value <= 30 then
-    wait(2)
-    StatusLabel.Text = "New player detected!"
-    wait(1)
-    ToggleAuto() -- Auto-start
-end
+-- Draggable GUI
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        shadow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X + 2, startPos.Y.Scale, startPos.Y.Offset + delta.Y + 2)
+    end
+end)
+
+MainFrame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
 
 -- Status updater
 coroutine.wrap(function()
-    while wait(2) do
+    while wait(1) do
         if not AutoEnabled then
-            StatusLabel.Text = `Money: ${ShecklesCount.Value} | Crops: {GetCropCount()}`
+            local money = ShecklesCount.Value
+            local crops = GetCropCount()
+            local harvestableCrops = GetHarvestableCrops()
+            InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
         end
     end
 end)()
 
-print("🌱 Simple Auto-Farm loaded! Click the button to start!")
+-- Auto-start for new players
+if ShecklesCount.Value <= 50 then
+    wait(3)
+    StatusLabel.Text = "🆕 New player detected!"
+    wait(2)
+    ToggleAuto()
+end
+
+print("🌟 Enhanced Auto-Farm loaded successfully!")
+print("✨ Features: Smart warp, auto-sell when needed, improved planting!")
+print("🎮 Click the button to start enhanced farming!")
