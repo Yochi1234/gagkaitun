@@ -135,7 +135,6 @@ local function PlantSeed(seedName)
         return
     end
 
-    -- วาร์ปไปกลางฟาร์มก่อนปลูกทั้งหมด
     hrp.CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 0))
     task.wait(0.1)
 
@@ -147,11 +146,11 @@ local function PlantSeed(seedName)
             if event then
                 event:FireServer(pos, seedName)
                 planted += 1
-                task.wait(0.05) -- ปลูกเร็วขึ้น
+                task.wait(0.05)
                 break
             end
         end
-        if planted >= 20 then break end -- จำกัดจำนวนปลูกต่อรอบ
+        if planted >= 20 then break end
     end
 end
 
