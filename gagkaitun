@@ -1,109 +1,184 @@
 --[[
-    @author Enhanced Auto-Farm for Grow a Garden - FULLY FIXED VERSION
-    @description Smart auto-farm with comprehensive error handling and nil value fixes
+    @author Enhanced Auto-Farm for Grow a Garden - LINE 1 ERROR FIXED
+    @description Fixed version with proper initialization order
     https://www.roblox.com/games/126884695634066
 ]]
 
---// Services
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
+-- Wait for game to load completely before doing anything
+task.wait(5)
+
+-- Check if we're in the right environment
+if not game or not game.GetService then
+    error("Script not running in proper Roblox environment")
+    return
+end
+
+-- Safe service initialization with error handling
+local function GetServiceSafely(serviceName)
+    local success, service = pcall(function()
+        return game:GetService(serviceName)
+    end)
+    
+    if not success then
+        warn(`Failed to get service: {serviceName}`)
+        return nil
+    end
+    
+    return service
+end
+
+-- Initialize services safely
+local ReplicatedStorage = GetServiceSafely("ReplicatedStorage")
+local Players = GetServiceSafely("Players")
+local RunService = GetServiceSafely("RunService")
+local TweenService = GetServiceSafely("TweenService")
+local UserInputService = GetServiceSafely("UserInputService")
+
+-- Validate essential services
+if not ReplicatedStorage or not Players or not RunService then
+    error("Essential services not available - game may not be loaded")
+    return
+end
 
 local LocalPlayer = Players.LocalPlayer
-local Backpack = LocalPlayer.Backpack
-local PlayerGui = LocalPlayer.PlayerGui
+if not LocalPlayer then
+    error("LocalPlayer not found - script may be running too early")
+    return
+end
 
--- Enhanced wait for character and leaderstats
-local function WaitForCharacterAndStats()
+-- Wait for player to fully load
+local function WaitForPlayerReady()
+    print("⏳ Waiting for player to be ready...")
+    
+    -- Wait for character
     local Character = LocalPlayer.CharacterAdded:Wait()
+    local Humanoid = Character:WaitForChild("Humanoid", 10)
+    local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart", 10)
+    
+    if not Humanoid or not HumanoidRootPart then
+        error("Character components not loaded properly")
+        return false
+    end
+    
+    -- Wait for backpack
+    local Backpack = LocalPlayer:WaitForChild("Backpack", 10)
+    if not Backpack then
+        error("Backpack not found")
+        return false
+    end
+    
+    -- Wait for leaderstats
     local Leaderstats = LocalPlayer:WaitForChild("leaderstats", 15)
-    
     if not Leaderstats then
-        warn("❌ Leaderstats not found! Game may not be fully loaded.")
-        return nil, nil
+        error("Leaderstats not found - wrong game or not loaded")
+        return false
     end
     
-    return Character, Leaderstats
+    print("✅ Player ready!")
+    return true, Character, Backpack, Leaderstats
 end
 
-local Character, Leaderstats = WaitForCharacterAndStats()
-if not Leaderstats then
+-- Initialize player components
+local playerReady, Character, Backpack, Leaderstats = WaitForPlayerReady()
+if not playerReady then
     return
 end
 
--- Find the money stat with better error handling
-local ShecklesCount = Leaderstats:FindFirstChild("Sheckles") or 
-                     Leaderstats:FindFirstChild("Money") or 
-                     Leaderstats:FindFirstChild("Cash") or 
-                     Leaderstats:FindFirstChild("Coins") or
-                     Leaderstats:FindFirstChild("Currency")
-
-if not ShecklesCount then
-    warn("❌ Money stat not found in leaderstats!")
-    print("📋 Available stats:")
-    for _, stat in pairs(Leaderstats:GetChildren()) do
-        print(`  - {stat.Name}`)
+-- Find money stat with extensive search
+local function FindMoneyStat(leaderstats)
+    local possibleNames = {
+        "Sheckles", "Money", "Cash", "Coins", "Currency", 
+        "Dollars", "Gold", "Credits", "Points", "Funds"
+    }
+    
+    for _, name in pairs(possibleNames) do
+        local stat = leaderstats:FindFirstChild(name)
+        if stat then
+            print(`💰 Found money stat: {name}`)
+            return stat
+        end
     end
+    
+    -- If not found, list all available stats
+    print("❌ Money stat not found. Available stats:")
+    for _, child in pairs(leaderstats:GetChildren()) do
+        print(`  - {child.Name} ({child.ClassName})`)
+    end
+    
+    return nil
+end
+
+local ShecklesCount = FindMoneyStat(Leaderstats)
+if not ShecklesCount then
+    error("Could not find money stat in leaderstats")
     return
 end
 
-print(`💰 Found money stat: {ShecklesCount.Name}`)
-
---// Enhanced Folders and Remotes Detection with nil checks
+-- Game structure detection with multiple retries
 local GameEvents = nil
 local Farms = nil
 
--- Safe detection function with multiple attempts
-local function SafeDetectGameStructure()
-    print("🔍 Safely detecting game structure...")
+local function DetectGameStructure()
+    print("🔍 Detecting game structure...")
     
-    -- Wait for game to fully load
-    task.wait(3)
+    local maxAttempts = 5
+    local currentAttempt = 0
     
-    -- Check ReplicatedStorage structure with error handling
-    local possibleEventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents"}
-    for _, folderName in pairs(possibleEventFolders) do
-        local success, folder = pcall(function()
-            return ReplicatedStorage:FindFirstChild(folderName)
-        end)
+    while currentAttempt < maxAttempts and (not GameEvents or not Farms) do
+        currentAttempt = currentAttempt + 1
+        print(`Attempt {currentAttempt}/{maxAttempts}`)
         
-        if success and folder then
-            GameEvents = folder
-            print(`📁 Found events folder: {folderName}`)
-            break
+        -- Look for events folder
+        if not GameEvents then
+            local eventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents", "ServerEvents"}
+            for _, folderName in pairs(eventFolders) do
+                local folder = ReplicatedStorage:FindFirstChild(folderName)
+                if folder then
+                    GameEvents = folder
+                    print(`📁 Found events: {folderName}`)
+                    break
+                end
+            end
+        end
+        
+        -- Look for farms folder
+        if not Farms then
+            local farmFolders = {"Farm", "Farms", "FarmPlots", "PlayerFarms", "Plots"}
+            for _, folderName in pairs(farmFolders) do
+                local folder = game.Workspace:FindFirstChild(folderName)
+                if folder then
+                    Farms = folder
+                    print(`🌾 Found farms: {folderName}`)
+                    break
+                end
+            end
+        end
+        
+        if not GameEvents or not Farms then
+            print("Waiting for game to load more...")
+            task.wait(2)
         end
     end
     
-    -- Check workspace farm structure with error handling
-    local possibleFarmFolders = {"Farm", "Farms", "FarmPlots", "PlayerFarms"}
-    for _, folderName in pairs(possibleFarmFolders) do
-        local success, folder = pcall(function()
-            return workspace:FindFirstChild(folderName)
-        end)
-        
-        if success and folder then
-            Farms = folder
-            print(`🌾 Found farms folder: {folderName}`)
-            break
-        end
-    end
-    
-    -- Debug information
     if GameEvents then
-        print("📋 Available GameEvents:")
-        for _, child in pairs(GameEvents:GetChildren()) do
-            print(`  - {child.Name} ({child.ClassName})`)
+        print("Available events:")
+        for _, event in pairs(GameEvents:GetChildren()) do
+            print(`  - {event.Name}`)
         end
     else
-        print("❌ No GameEvents folder found!")
+        print("❌ No events folder found!")
     end
     
     return GameEvents ~= nil and Farms ~= nil
 end
 
---// Progression System
+-- Detect game structure
+local detectionSuccess = DetectGameStructure()
+if not detectionSuccess then
+    warn("⚠️ Could not detect full game structure - some features may not work")
+end
+
+-- Seed progression system
 local SeedProgression = {
     {name = "Carrot", price = 5, unlock = 0},
     {name = "Corn", price = 15, unlock = 100},
@@ -114,113 +189,76 @@ local SeedProgression = {
     {name = "Blueberry", price = 300, unlock = 10000},
 }
 
---// Global Variables
-local IsRunning = false
+-- Global variables
 local AutoEnabled = false
 local AutoLoopConnection = nil
-local MAX_BACKPACK_SIZE = 20
-local MIN_CROPS_TO_SELL = 3
 
---// Warp Positions
-local WarpPositions = {
-    Sell = CFrame.new(62, 4, -26),
-    Shop = CFrame.new(0, 4, 0),
-    Farm = nil
-}
-
---// Enhanced GUI with better error handling
-local function CreateGUI()
-    local success, result = pcall(function()
+-- GUI Creation with error handling
+local function CreateSimpleGUI()
+    local success, gui = pcall(function()
+        -- Remove any existing GUI
+        local existingGui = game.CoreGui:FindFirstChild("SimpleAutoFarmGUI")
+        if existingGui then
+            existingGui:Destroy()
+        end
+        
         local ScreenGui = Instance.new("ScreenGui")
-        local MainFrame = Instance.new("Frame")
-        local ToggleButton = Instance.new("TextButton")
-        local StatusLabel = Instance.new("TextLabel")
-        local InfoLabel = Instance.new("TextLabel")
-
-        ScreenGui.Name = "EnhancedAutoFarmGUI"
+        ScreenGui.Name = "SimpleAutoFarmGUI"
         ScreenGui.Parent = game.CoreGui
-
-        MainFrame.Name = "MainFrame"
-        MainFrame.Parent = ScreenGui
-        MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-        MainFrame.BorderSizePixel = 0
+        
+        local MainFrame = Instance.new("Frame")
+        MainFrame.Size = UDim2.new(0, 200, 0, 100)
         MainFrame.Position = UDim2.new(0, 10, 0, 10)
-        MainFrame.Size = UDim2.new(0, 220, 0, 130)
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 10)
-        corner.Parent = MainFrame
-
-        ToggleButton.Name = "ToggleButton"
-        ToggleButton.Parent = MainFrame
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(46, 125, 50)
-        ToggleButton.Position = UDim2.new(0.05, 0, 0.15, 0)
-        ToggleButton.Size = UDim2.new(0.9, 0, 0.35, 0)
-        ToggleButton.Font = Enum.Font.GothamBold
-        ToggleButton.Text = "🚀 START ENHANCED AUTO"
+        MainFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        MainFrame.Parent = ScreenGui
+        
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Size = UDim2.new(1, -10, 0, 30)
+        ToggleButton.Position = UDim2.new(0, 5, 0, 5)
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        ToggleButton.Text = "START AUTO FARM"
         ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-        ToggleButton.TextScaled = true
-
-        local toggleCorner = Instance.new("UICorner")
-        toggleCorner.CornerRadius = UDim.new(0, 8)
-        toggleCorner.Parent = ToggleButton
-
-        StatusLabel.Name = "StatusLabel"
-        StatusLabel.Parent = MainFrame
+        ToggleButton.Parent = MainFrame
+        
+        local StatusLabel = Instance.new("TextLabel")
+        StatusLabel.Size = UDim2.new(1, -10, 0, 20)
+        StatusLabel.Position = UDim2.new(0, 5, 0, 40)
         StatusLabel.BackgroundTransparency = 1
-        StatusLabel.Position = UDim2.new(0.05, 0, 0.55, 0)
-        StatusLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
-        StatusLabel.Font = Enum.Font.GothamMedium
-        StatusLabel.Text = "🌱 Ready to farm!"
-        StatusLabel.TextColor3 = Color3.fromRGB(76, 175, 80)
+        StatusLabel.Text = "Ready to farm!"
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         StatusLabel.TextScaled = true
-
-        InfoLabel.Name = "InfoLabel"
-        InfoLabel.Parent = MainFrame
+        StatusLabel.Parent = MainFrame
+        
+        local InfoLabel = Instance.new("TextLabel")
+        InfoLabel.Size = UDim2.new(1, -10, 0, 20)
+        InfoLabel.Position = UDim2.new(0, 5, 0, 65)
         InfoLabel.BackgroundTransparency = 1
-        InfoLabel.Position = UDim2.new(0.05, 0, 0.75, 0)
-        InfoLabel.Size = UDim2.new(0.9, 0, 0.2, 0)
-        InfoLabel.Font = Enum.Font.Gotham
-        InfoLabel.Text = "💰 $0 | 📦 0 crops"
+        InfoLabel.Text = "Money: $0"
         InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
         InfoLabel.TextScaled = true
-
-        return ScreenGui, MainFrame, ToggleButton, StatusLabel, InfoLabel
+        InfoLabel.Parent = MainFrame
+        
+        return ScreenGui, ToggleButton, StatusLabel, InfoLabel
     end)
     
-    if not success then
-        warn("❌ Failed to create GUI: " .. tostring(result))
+    if success then
+        return gui
+    else
+        warn("Failed to create GUI: " .. tostring(gui))
         return nil
     end
-    
-    return result
 end
 
-local ScreenGui, MainFrame, ToggleButton, StatusLabel, InfoLabel = CreateGUI()
+local ScreenGui, ToggleButton, StatusLabel, InfoLabel = CreateSimpleGUI()
 if not ScreenGui then
+    error("Could not create GUI")
     return
 end
 
---// Enhanced Utility Functions with nil checks
-local function SafeWarp(targetCFrame, speed)
-    local success, result = pcall(function()
-        local Character = LocalPlayer.Character
-        if not Character or not Character:FindFirstChild("HumanoidRootPart") then 
-            return false 
-        end
-        
-        local HumanoidRootPart = Character.HumanoidRootPart
-        HumanoidRootPart.CFrame = targetCFrame
-        task.wait(0.2)
-        return true
-    end)
-    
-    return success and result
-end
-
+-- Simple utility functions
 local function GetBestSeed()
-    if not ShecklesCount or not ShecklesCount.Value then 
-        return "Carrot" 
+    if not ShecklesCount or not ShecklesCount.Value then
+        return "Carrot"
     end
     
     local money = ShecklesCount.Value
@@ -237,12 +275,20 @@ local function GetBestSeed()
     return bestSeed
 end
 
+local function SafeWarp(position)
+    local success = pcall(function()
+        local Character = LocalPlayer.Character
+        if Character and Character:FindFirstChild("HumanoidRootPart") then
+            Character.HumanoidRootPart.CFrame = position
+        end
+    end)
+    return success
+end
+
 local function GetMyFarm()
-    if not Farms or not Farms.Parent then 
-        return nil 
-    end
+    if not Farms then return nil end
     
-    local success, result = pcall(function()
+    local success, farm = pcall(function()
         for _, Farm in pairs(Farms:GetChildren()) do
             local Important = Farm:FindFirstChild("Important")
             if Important then
@@ -250,11 +296,6 @@ local function GetMyFarm()
                 if Data then
                     local Owner = Data:FindFirstChild("Owner")
                     if Owner and Owner.Value == LocalPlayer.Name then
-                        -- Set farm warp position safely
-                        local farmCFrame = Farm:GetPivot()
-                        if farmCFrame then
-                            WarpPositions.Farm = farmCFrame * CFrame.new(0, 5, 0)
-                        end
                         return Farm
                     end
                 end
@@ -263,532 +304,208 @@ local function GetMyFarm()
         return nil
     end)
     
-    if success then
-        return result
-    else
-        warn("❌ Error getting farm: " .. tostring(result))
-        return nil
-    end
+    return success and farm or nil
 end
 
-local function SafeGetOwnedSeeds()
-    local seeds = {}
-    
-    local success = pcall(function()
-        local Character = LocalPlayer.Character
-        
-        -- Check backpack
-        if Backpack then
-            for _, tool in pairs(Backpack:GetChildren()) do
-                local plantName = tool:FindFirstChild("Plant_Name")
-                local count = tool:FindFirstChild("Numbers")
-                if plantName and count then
-                    seeds[plantName.Value] = {tool = tool, count = count.Value}
-                end
-            end
-        end
-        
-        -- Check character
-        if Character then
-            for _, tool in pairs(Character:GetChildren()) do
-                local plantName = tool:FindFirstChild("Plant_Name")
-                local count = tool:FindFirstChild("Numbers")
-                if plantName and count then
-                    seeds[plantName.Value] = {tool = tool, count = count.Value}
-                end
-            end
-        end
-    end)
-    
-    if not success then
-        warn("❌ Error getting owned seeds")
-    end
-    
-    return seeds
-end
-
-local function SafeGetCropCount()
-    local count = 0
-    
-    local success = pcall(function()
-        local Character = LocalPlayer.Character
-        
-        -- Check backpack
-        if Backpack then
-            for _, tool in pairs(Backpack:GetChildren()) do
-                if tool:FindFirstChild("Item_String") then
-                    count = count + 1
-                end
-            end
-        end
-        
-        -- Check character
-        if Character then
-            for _, tool in pairs(Character:GetChildren()) do
-                if tool:FindFirstChild("Item_String") then
-                    count = count + 1
-                end
-            end
-        end
-    end)
-    
-    if not success then
-        warn("❌ Error getting crop count")
-    end
-    
-    return count
-end
-
-local function SafeGetHarvestableCrops()
-    local myFarm = GetMyFarm()
-    if not myFarm then return 0 end
-    
-    local success, count = pcall(function()
-        local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
-        if not plantsPhysical then return 0 end
-        
-        local cropCount = 0
-        local function countInFolder(folder)
-            for _, plant in pairs(folder:GetChildren()) do
-                local fruits = plant:FindFirstChild("Fruits")
-                if fruits then
-                    countInFolder(fruits)
-                end
-                
-                local prompt = plant:FindFirstChild("ProximityPrompt", true)
-                if prompt and prompt.Enabled then
-                    cropCount = cropCount + 1
-                end
-            end
-        end
-        
-        countInFolder(plantsPhysical)
-        return cropCount
-    end)
-    
-    return success and count or 0
-end
-
---// Safe Remote Event Calling
-local function SafeFireRemote(remoteName, ...)
-    if not GameEvents then
-        return false
-    end
-    
-    local success = pcall(function()
-        local remote = GameEvents:FindFirstChild(remoteName)
-        if remote and remote:IsA("RemoteEvent") then
-            remote:FireServer(...)
-            return true
-        end
-        return false
-    end)
-    
-    return success
-end
-
---// Enhanced Main Functions with comprehensive error handling
-local function SafeBuySeeds()
-    if not GameEvents or not ShecklesCount then 
-        return false 
-    end
+-- Simple auto-farm functions
+local function BuySeeds()
+    if not GameEvents or not ShecklesCount then return end
     
     local success = pcall(function()
         local bestSeed = GetBestSeed()
-        local money = ShecklesCount.Value
-        local ownedSeeds = SafeGetOwnedSeeds()
-        local currentSeedCount = ownedSeeds[bestSeed] and ownedSeeds[bestSeed].count or 0
+        local buyEvents = {"BuySeedStock", "BuySeed", "BuySeeds", "PurchaseSeed"}
         
-        if currentSeedCount < 10 then
-            local seedData
-            for _, seed in pairs(SeedProgression) do
-                if seed.name == bestSeed then
-                    seedData = seed
-                    break
-                end
-            end
-            
-            if seedData and money >= seedData.price then
-                if StatusLabel then
-                    StatusLabel.Text = "🛒 Buying seeds..."
-                end
-                
-                local buyMethods = {
-                    "BuySeedStock",
-                    "BuySeed", 
-                    "BuySeeds",
-                    "PurchaseSeed"
-                }
-                
-                local bought = false
-                for _, method in pairs(buyMethods) do
-                    if SafeFireRemote(method, bestSeed) then
-                        bought = true
-                        break
-                    end
-                    task.wait(0.1)
-                end
-                
-                if StatusLabel then
-                    StatusLabel.Text = bought and "✅ Seeds bought!" or "❌ Buy failed"
-                end
-                task.wait(1)
-            end
-        end
-    end)
-    
-    return success
-end
-
-local function SafeSmartPlant()
-    local myFarm = GetMyFarm()
-    if not myFarm then return false end
-    
-    local success = pcall(function()
-        local plantLocations = myFarm.Important:FindFirstChild("Plant_Locations")
-        if not plantLocations then return false end
-        
-        local farmLands = plantLocations:GetChildren()
-        if #farmLands == 0 then return false end
-        
-        local ownedSeeds = SafeGetOwnedSeeds()
-        local bestSeed = GetBestSeed()
-        local seedData = ownedSeeds[bestSeed]
-        
-        if not seedData or seedData.count <= 0 then return false end
-        
-        if StatusLabel then
-            StatusLabel.Text = "🌱 Smart planting..."
-        end
-        
-        if WarpPositions.Farm then
-            SafeWarp(WarpPositions.Farm)
-        end
-        
-        local Character = LocalPlayer.Character
-        if Character and seedData.tool.Parent == Backpack then
-            local Humanoid = Character:FindFirstChild("Humanoid")
-            if Humanoid then
-                Humanoid:EquipTool(seedData.tool)
-                task.wait(0.5)
-            end
-        end
-        
-        local farmLand = farmLands[1]
-        local center = farmLand:GetPivot()
-        local plantCount = math.min(seedData.count, 8)
-        
-        local plantMethods = {
-            "Plant_RE",
-            "PlantSeed",
-            "Plant"
-        }
-        
-        for i = 1, plantCount do
-            if not AutoEnabled then break end
-            
-            local x = center.X + math.random(-8, 8)
-            local z = center.Z + math.random(-8, 8)
-            local position = Vector3.new(x, 0.13, z)
-            
-            for _, method in pairs(plantMethods) do
-                SafeFireRemote(method, position, bestSeed)
-                task.wait(0.1)
-            end
-            task.wait(0.3)
-        end
-        
-        if StatusLabel then
-            StatusLabel.Text = `✅ Planted {plantCount} {bestSeed}`
-        end
-    end)
-    
-    return success
-end
-
-local function SafeSmartHarvest()
-    local myFarm = GetMyFarm()
-    if not myFarm then return false end
-    
-    local success = pcall(function()
-        local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
-        if not plantsPhysical then return false end
-        
-        if StatusLabel then
-            StatusLabel.Text = "🌾 Harvesting crops..."
-        end
-        
-        if WarpPositions.Farm then
-            SafeWarp(WarpPositions.Farm)
-        end
-        
-        local harvestedCount = 0
-        local targets = {}
-        
-        local function collectTargets(folder)
-            for _, plant in pairs(folder:GetChildren()) do
-                local fruits = plant:FindFirstChild("Fruits")
-                if fruits then
-                    collectTargets(fruits)
-                end
-                
-                local prompt = plant:FindFirstChild("ProximityPrompt", true)
-                if prompt and prompt.Enabled then
-                    table.insert(targets, {plant = plant, prompt = prompt})
-                end
-            end
-        end
-        
-        collectTargets(plantsPhysical)
-        
-        for _, target in pairs(targets) do
-            if SafeGetCropCount() >= MAX_BACKPACK_SIZE or not AutoEnabled then 
-                break 
-            end
-            
-            local plant = target.plant
-            local prompt = target.prompt
-            
-            local Character = LocalPlayer.Character
-            if Character and Character:FindFirstChild("HumanoidRootPart") then
-                local plantPos = plant:GetPivot().Position
-                Character.HumanoidRootPart.CFrame = CFrame.new(plantPos + Vector3.new(0, 3, 0))
-                task.wait(0.2)
-            end
-            
-            if prompt.Enabled then
-                local promptSuccess = pcall(function()
-                    fireproximityprompt(prompt)
-                end)
-                
-                if promptSuccess then
-                    harvestedCount = harvestedCount + 1
-                end
-                task.wait(0.1)
-            end
-        end
-        
-        if StatusLabel then
-            if harvestedCount > 0 then
-                StatusLabel.Text = `✅ Harvested {harvestedCount} crops`
-            else
-                StatusLabel.Text = "⏳ No crops ready"
-            end
-        end
-    end)
-    
-    return success
-end
-
-local function SafeSmartSell()
-    local cropCount = SafeGetCropCount()
-    if cropCount < MIN_CROPS_TO_SELL then return false end
-    
-    local success = pcall(function()
-        if StatusLabel then
-            StatusLabel.Text = "💰 Selling crops..."
-        end
-        
-        local previousMoney = ShecklesCount.Value
-        SafeWarp(WarpPositions.Sell)
-        
-        local sellMethods = {
-            "Sell_Inventory",
-            "SellInventory", 
-            "Sell",
-            "SellCrops",
-            "SellAll"
-        }
-        
-        local attempts = 0
-        local maxAttempts = 5
-        
-        while attempts < maxAttempts and SafeGetCropCount() > 0 and AutoEnabled do
-            for _, method in pairs(sellMethods) do
-                SafeFireRemote(method)
-            end
-            
-            task.wait(0.5)
-            attempts = attempts + 1
-            
-            if ShecklesCount.Value > previousMoney then
+        for _, eventName in pairs(buyEvents) do
+            local event = GameEvents:FindFirstChild(eventName)
+            if event and event:IsA("RemoteEvent") then
+                event:FireServer(bestSeed)
                 break
             end
         end
+    end)
+    
+    if success then
+        StatusLabel.Text = "Bought seeds"
+    else
+        StatusLabel.Text = "Buy failed"
+    end
+end
+
+local function PlantSeeds()
+    local myFarm = GetMyFarm()
+    if not myFarm or not GameEvents then return end
+    
+    local success = pcall(function()
+        local plantEvents = {"Plant_RE", "PlantSeed", "Plant"}
+        local bestSeed = GetBestSeed()
         
-        local profit = ShecklesCount.Value - previousMoney
-        if StatusLabel then
-            if profit > 0 then
-                StatusLabel.Text = `💰 Sold! +$${profit}`
-            else
-                StatusLabel.Text = "❌ Sell failed"
+        -- Try to plant at farm center
+        local farmCenter = myFarm:GetPivot()
+        local plantPosition = Vector3.new(farmCenter.X, 0.13, farmCenter.Z)
+        
+        for _, eventName in pairs(plantEvents) do
+            local event = GameEvents:FindFirstChild(eventName)
+            if event and event:IsA("RemoteEvent") then
+                event:FireServer(plantPosition, bestSeed)
+                break
+            end
+        end
+    end)
+    
+    if success then
+        StatusLabel.Text = "Planted seeds"
+    else
+        StatusLabel.Text = "Plant failed"
+    end
+end
+
+local function HarvestCrops()
+    local myFarm = GetMyFarm()
+    if not myFarm then return end
+    
+    local success = pcall(function()
+        local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
+        if not plantsPhysical then return end
+        
+        local harvested = 0
+        local function harvestInFolder(folder)
+            for _, plant in pairs(folder:GetChildren()) do
+                local prompt = plant:FindFirstChild("ProximityPrompt", true)
+                if prompt and prompt.Enabled then
+                    fireproximityprompt(prompt)
+                    harvested = harvested + 1
+                    task.wait(0.1)
+                end
+                
+                local fruits = plant:FindFirstChild("Fruits")
+                if fruits then
+                    harvestInFolder(fruits)
+                end
             end
         end
         
-        task.wait(1)
+        harvestInFolder(plantsPhysical)
+        StatusLabel.Text = `Harvested ${harvested} crops`
     end)
     
-    return success
+    if not success then
+        StatusLabel.Text = "Harvest failed"
+    end
 end
 
---// Safe Auto Loop with comprehensive error handling
-local function SafeEnhancedAutoLoop()
+local function SellCrops()
+    if not GameEvents then return end
+    
+    local success = pcall(function()
+        SafeWarp(CFrame.new(62, 4, -26)) -- Sell area position
+        task.wait(1)
+        
+        local sellEvents = {"Sell_Inventory", "SellInventory", "Sell", "SellCrops", "SellAll"}
+        
+        for _, eventName in pairs(sellEvents) do
+            local event = GameEvents:FindFirstChild(eventName)
+            if event and event:IsA("RemoteEvent") then
+                event:FireServer()
+                break
+            end
+        end
+    end)
+    
+    if success then
+        StatusLabel.Text = "Sold crops"
+    else
+        StatusLabel.Text = "Sell failed"
+    end
+end
+
+-- Simple auto-farm loop
+local function AutoFarmLoop()
     AutoLoopConnection = task.spawn(function()
         while AutoEnabled do
-            local success, errorMsg = pcall(function()
-                if not AutoEnabled then break end
-                
-                -- Check if essential components still exist
-                if not ShecklesCount or not ShecklesCount.Parent then 
-                    if StatusLabel then
-                        StatusLabel.Text = "❌ Money stat lost!"
-                    end
-                    break 
+            local success = pcall(function()
+                -- Update info
+                if ShecklesCount and InfoLabel then
+                    InfoLabel.Text = `Money: $${ShecklesCount.Value}`
                 end
                 
-                local money = ShecklesCount.Value or 0
-                local crops = SafeGetCropCount()
-                local harvestableCrops = SafeGetHarvestableCrops()
-                
-                if InfoLabel then
-                    InfoLabel.Text = `💰 ${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
-                end
-                
-                -- Auto-farm sequence with error handling
+                -- Farm sequence
                 if AutoEnabled then
-                    -- 1. Sell if needed
-                    if (crops >= MAX_BACKPACK_SIZE or (harvestableCrops == 0 and crops >= MIN_CROPS_TO_SELL)) then
-                        SafeSmartSell()
-                        task.wait(2)
-                    end
-                    
-                    -- 2. Buy seeds
-                    if money >= 50 and AutoEnabled then
-                        SafeBuySeeds()
-                        task.wait(1)
-                    end
-                    
-                    -- 3. Plant
-                    if AutoEnabled then
-                        SafeSmartPlant()
-                        task.wait(2)
-                    end
-                    
-                    -- 4. Harvest
-                    if AutoEnabled then
-                        SafeSmartHarvest()
-                        task.wait(2)
-                    end
-                    
-                    -- 5. Rest
-                    if AutoEnabled then
-                        if StatusLabel then
-                            StatusLabel.Text = "⏳ Waiting..."
-                        end
-                        task.wait(3)
-                    end
+                    BuySeeds()
+                    task.wait(2)
+                end
+                
+                if AutoEnabled then
+                    PlantSeeds()
+                    task.wait(2)
+                end
+                
+                if AutoEnabled then
+                    HarvestCrops()
+                    task.wait(2)
+                end
+                
+                if AutoEnabled then
+                    SellCrops()
+                    task.wait(3)
                 end
             end)
             
             if not success then
-                warn("❌ Auto-farm error: " .. tostring(errorMsg))
-                if StatusLabel then
-                    StatusLabel.Text = "❌ Error occurred, retrying..."
-                end
+                StatusLabel.Text = "Error occurred"
                 task.wait(2)
             end
         end
     end)
 end
 
---// Safe Toggle Function
-local function SafeToggleAuto()
-    local success = pcall(function()
-        AutoEnabled = not AutoEnabled
+-- Toggle function
+local function ToggleAutoFarm()
+    AutoEnabled = not AutoEnabled
+    
+    if AutoEnabled then
+        ToggleButton.Text = "STOP AUTO FARM"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+        StatusLabel.Text = "Auto-farm started"
         
-        if AutoEnabled then
-            if ToggleButton then
-                ToggleButton.Text = "🛑 STOP AUTO"
-                ToggleButton.BackgroundColor3 = Color3.fromRGB(244, 67, 54)
-            end
-            if StatusLabel then
-                StatusLabel.Text = "🚀 Enhanced auto-farm started!"
-            end
-            
-            -- Stop old loop
-            if AutoLoopConnection then
-                task.cancel(AutoLoopConnection)
-            end
-            
-            -- Start new loop
-            SafeEnhancedAutoLoop()
-        else
-            if ToggleButton then
-                ToggleButton.Text = "🚀 START ENHANCED AUTO"
-                ToggleButton.BackgroundColor3 = Color3.fromRGB(46, 125, 50)
-            end
-            if StatusLabel then
-                StatusLabel.Text = "⏹️ Auto-farm stopped!"
-            end
-            
-            -- Stop loop
-            if AutoLoopConnection then
-                task.cancel(AutoLoopConnection)
-                AutoLoopConnection = nil
-            end
+        if AutoLoopConnection then
+            task.cancel(AutoLoopConnection)
         end
-    end)
-    
-    if not success then
-        warn("❌ Failed to toggle auto-farm")
+        AutoFarmLoop()
+    else
+        ToggleButton.Text = "START AUTO FARM"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        StatusLabel.Text = "Auto-farm stopped"
+        
+        if AutoLoopConnection then
+            task.cancel(AutoLoopConnection)
+            AutoLoopConnection = nil
+        end
     end
 end
 
---// Initialize everything safely
-local function Initialize()
-    -- Detect game structure first
-    local detectionSuccess = SafeDetectGameStructure()
-    
-    if not detectionSuccess then
-        if StatusLabel then
-            StatusLabel.Text = "❌ Game structure not detected!"
-        end
-        return
-    end
-    
-    -- Connect button
-    if ToggleButton then
-        ToggleButton.MouseButton1Click:Connect(SafeToggleAuto)
-    end
-    
-    -- Status updater
-    task.spawn(function()
-        while task.wait(1) do
-            local success = pcall(function()
-                if not AutoEnabled and ShecklesCount and InfoLabel then
-                    local money = ShecklesCount.Value or 0
-                    local crops = SafeGetCropCount()
-                    local harvestableCrops = SafeGetHarvestableCrops()
-                    InfoLabel.Text = `💰 ${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
-                elseif not ShecklesCount and InfoLabel then
-                    InfoLabel.Text = "❌ Waiting for game to load..."
-                end
-            end)
-            
-            if not success then
-                warn("❌ Status update error")
-            end
+-- Connect the button
+if ToggleButton then
+    ToggleButton.MouseButton1Click:Connect(function()
+        local success = pcall(ToggleAutoFarm)
+        if not success then
+            warn("Failed to toggle auto-farm")
         end
     end)
-    
-    print("🌟 Enhanced Auto-Farm loaded successfully!")
-    print("✨ All nil value errors fixed!")
-    print("🎮 Click the button to start enhanced farming!")
-    print("🔧 FULLY FIXED: Comprehensive error handling added!")
 end
 
--- Initialize with delay
-task.spawn(function()
-    task.wait(2)
-    Initialize()
-end)
+-- Success message
+print("🌟 Simple Auto-Farm loaded successfully!")
+print("🔧 Line 1 error fixed with proper initialization")
+print("🎮 Click the button to start farming!")
+
+-- Keep the script alive
+while true do
+    task.wait(1)
+    
+    -- Update money display
+    if ShecklesCount and InfoLabel and not AutoEnabled then
+        local success = pcall(function()
+            InfoLabel.Text = `Money: $${ShecklesCount.Value}`
+        end)
+    end
+end
