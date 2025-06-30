@@ -17,9 +17,47 @@ local PlayerGui = LocalPlayer.PlayerGui
 
 local ShecklesCount = Leaderstats.Sheckles
 
---// Folders
-local GameEvents = ReplicatedStorage.GameEvents
-local Farms = workspace.Farm
+--// Folders and Remotes Detection
+local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents") or ReplicatedStorage:FindFirstChild("Events") or ReplicatedStorage:FindFirstChild("Remotes")
+local Farms = workspace:FindFirstChild("Farm") or workspace:FindFirstChild("Farms") or workspace:FindFirstChild("FarmPlots")
+
+-- Auto-detect game structure for different versions
+local function DetectGameStructure()
+    print("🔍 Detecting game structure...")
+    
+    -- Check ReplicatedStorage structure
+    local possibleEventFolders = {"GameEvents", "Events", "Remotes", "RemoteEvents"}
+    for _, folderName in pairs(possibleEventFolders) do
+        local folder = ReplicatedStorage:FindFirstChild(folderName)
+        if folder then
+            GameEvents = folder
+            print(`📁 Found events folder: {folderName}`)
+            break
+        end
+    end
+    
+    -- Check workspace farm structure  
+    local possibleFarmFolders = {"Farm", "Farms", "FarmPlots", "PlayerFarms"}
+    for _, folderName in pairs(possibleFarmFolders) do
+        local folder = workspace:FindFirstChild(folderName)
+        if folder then
+            Farms = folder
+            print(`🌾 Found farms folder: {folderName}`)
+            break
+        end
+    end
+    
+    -- List available events for debugging
+    if GameEvents then
+        print("📋 Available GameEvents:")
+        for _, child in pairs(GameEvents:GetChildren()) do
+            print(`  - {child.Name}`)
+        end
+    end
+end
+
+-- Call detection on startup
+DetectGameStructure()
 
 --// Progression System
 local SeedProgression = {
@@ -263,12 +301,49 @@ local function BuySeeds()
             
             StatusLabel.Text = "🛒 Buying seeds..."
             
+            -- ลองหลายวิธีการซื้อสำหรับเวอร์ชันต่างๆ
+            local buyMethods = {
+                function() GameEvents.BuySeedStock:FireServer(bestSeed) end,
+                function() GameEvents.BuySeed:FireServer(bestSeed) end,
+                function() GameEvents.BuySeeds:FireServer(bestSeed) end,
+                function() GameEvents.PurchaseSeed:FireServer(bestSeed) end,
+                function() GameEvents.Shop:FireServer("BuySeed", bestSeed) end,
+                function() ReplicatedStorage.Remotes.BuySeed:FireServer(bestSeed) end,
+                function() ReplicatedStorage.Events.BuySeedStock:FireServer(bestSeed) end
+            }
+            
+            local success = false
+            local initialMoney = money
+            
             for i = 1, buyAmount do
-                GameEvents.BuySeedStock:FireServer(bestSeed)
+                -- ลองทุกวิธีจนกว่าจะสำเร็จ
+                for _, method in pairs(buyMethods) do
+                    pcall(function()
+                        method()
+                        success = true
+                    end)
+                    wait(0.1)
+                    
+                    -- ตรวจสอบว่าเงินลดลงหรือไม่ (หมายถึงซื้อสำเร็จ)
+                    if ShecklesCount.Value < initialMoney then
+                        success = true
+                        break
+                    end
+                end
+                
+                if success then
+                    initialMoney = ShecklesCount.Value
+                else
+                    break
+                end
                 wait(0.1)
             end
             
-            StatusLabel.Text = `✅ Bought {buyAmount} {bestSeed}`
+            if success then
+                StatusLabel.Text = `✅ Bought seeds successfully`
+            else
+                StatusLabel.Text = `❌ Failed to buy seeds (v1.4+ may need update)`
+            end
             wait(1)
         end
     end
@@ -312,6 +387,15 @@ local function SmartPlant()
     local plantCount = math.min(seedData.count, 12)
     local spacing = 4 -- ระยะห่างระหว่างต้นพืช
     
+    -- ลองหลายวิธีการปลูกสำหรับเวอร์ชันต่างๆ
+    local plantMethods = {
+        function(pos, seed) GameEvents.Plant_RE:FireServer(pos, seed) end,
+        function(pos, seed) GameEvents.PlantSeed:FireServer(pos, seed) end,
+        function(pos, seed) GameEvents.Plant:FireServer(pos, seed) end,
+        function(pos, seed) ReplicatedStorage.Remotes.Plant:FireServer(pos, seed) end,
+        function(pos, seed) GameEvents.PlantCrop:FireServer(pos, seed) end
+    }
+    
     for i = 1, plantCount do
         -- คำนวณตำแหน่งแบบกริด
         local row = math.floor((i - 1) / 4)
@@ -323,12 +407,20 @@ local function SmartPlant()
         
         -- ตรวจสอบว่าตำแหน่งอยู่ในฟาร์ม
         if math.abs(x - center.X) <= size.X/2 and math.abs(z - center.Z) <= size.Z/2 then
-            GameEvents.Plant_RE:FireServer(position, bestSeed)
+            -- ลองทุกวิธีการปลูก
+            local planted = false
+            for _, method in pairs(plantMethods) do
+                pcall(function()
+                    method(position, bestSeed)
+                    planted = true
+                end)
+                if planted then break end
+            end
             wait(0.3)
         end
     end
     
-    StatusLabel.Text = `✅ Planted {plantCount} {bestSeed}`
+    StatusLabel.Text = `✅ Attempted to plant {plantCount} {bestSeed}`
 end
 
 local function SmartHarvest()
@@ -408,26 +500,53 @@ local function SmartSell()
     -- วาร์ปไปจุดขาย
     SmoothWarp(WarpPositions.Sell)
     
+    -- ลองหลายวิธีการขายสำหรับเวอร์ชันต่างๆ
+    local sellMethods = {
+        function() GameEvents.Sell_Inventory:FireServer() end,
+        function() GameEvents.SellInventory:FireServer() end,
+        function() GameEvents.Sell:FireServer() end,
+        function() GameEvents.SellCrops:FireServer() end,
+        function() ReplicatedStorage.Remotes.Sell:FireServer() end,
+        function() GameEvents.SellAll:FireServer() end
+    }
+    
     -- ขายหลายครั้งเพื่อให้แน่ใจ
     local attempts = 0
     local maxAttempts = 20
+    local sellSuccess = false
     
     while attempts < maxAttempts and GetCropCount() > 0 do
-        GameEvents.Sell_Inventory:FireServer()
+        -- ลองทุกวิธีการขาย
+        for _, method in pairs(sellMethods) do
+            pcall(function()
+                method()
+            end)
+        end
+        
         wait(0.3)
         attempts = attempts + 1
         
         -- หยุดถ้าเงินเพิ่มขึ้น (ขายสำเร็จ)
         if ShecklesCount.Value > previousMoney then
+            sellSuccess = true
             break
         end
     end
     
     local profit = ShecklesCount.Value - previousMoney
-    if profit > 0 then
-        StatusLabel.Text = `💰 Sold! +$${profit}`
+    if profit > 0 or sellSuccess then
+        StatusLabel.Text = `💰 Sold! +${profit}`
     else
-        StatusLabel.Text = "❌ Sell failed"
+        StatusLabel.Text = "❌ Sell failed - trying alternative methods"
+        
+        -- ลองวิธีอื่นถ้าขายไม่ได้
+        wait(1)
+        pcall(function()
+            -- อาจต้องใช้วิธีอื่นในเวอร์ชันใหม่
+            if GameEvents:FindFirstChild("Trade") then
+                GameEvents.Trade:FireServer("sell_all")
+            end
+        end)
     end
     
     wait(1)
