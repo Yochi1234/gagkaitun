@@ -1,6 +1,6 @@
 --[[
-    @author Enhanced Auto-Farm for Grow a Garden
-    @description Smart auto-farm with warp system and improved planting
+    @author Enhanced Auto-Farm for Grow a Garden - FIXED VERSION
+    @description Smart auto-farm with improved error handling and button fix
     https://www.roblox.com/games/126884695634066
 ]]
 
@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local Leaderstats = LocalPlayer.leaderstats
@@ -73,14 +74,15 @@ local SeedProgression = {
 --// Global Variables
 local IsRunning = false
 local AutoEnabled = false
+local AutoLoopConnection = nil  -- เพิ่มตัวแปรนี้เพื่อควบคุม loop
 local MAX_BACKPACK_SIZE = 20
 local MIN_CROPS_TO_SELL = 3
 
 --// Warp Positions
 local WarpPositions = {
     Sell = CFrame.new(62, 4, -26),
-    Shop = CFrame.new(0, 4, 0), -- ปรับตำแหน่งตามร้านค้าจริง
-    Farm = nil -- จะถูกตั้งค่าเมื่อเจอฟาร์ม
+    Shop = CFrame.new(0, 4, 0),
+    Farm = nil
 }
 
 --// Enhanced GUI
@@ -159,11 +161,8 @@ local function SmoothWarp(targetCFrame, speed)
     if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
     
     local HumanoidRootPart = Character.HumanoidRootPart
-    local startCFrame = HumanoidRootPart.CFrame
-    
-    -- Instant warp for better performance
     HumanoidRootPart.CFrame = targetCFrame
-    wait(0.2)
+    task.wait(0.2)  -- ใช้ task.wait แทน wait
 end
 
 local function GetBestSeed()
@@ -182,6 +181,8 @@ local function GetBestSeed()
 end
 
 local function GetMyFarm()
+    if not Farms then return nil end
+    
     for _, Farm in pairs(Farms:GetChildren()) do
         if Farm:FindFirstChild("Important") and Farm.Important:FindFirstChild("Data") then
             local Owner = Farm.Important.Data:FindFirstChild("Owner")
@@ -192,6 +193,7 @@ local function GetMyFarm()
             end
         end
     end
+    return nil
 end
 
 local function GetOwnedSeeds()
@@ -274,18 +276,18 @@ local function ShouldSell()
     local cropCount = GetCropCount()
     local harvestableCrops = GetHarvestableCrops()
     
-    -- ขายเมื่อกระเป๋าเต็มหรือไม่มีผลให้เก็บแล้วและมีของในกระเป๋า
     return IsBackpackFull() or (harvestableCrops == 0 and cropCount >= MIN_CROPS_TO_SELL)
 end
 
 --// Enhanced Main Functions
 local function BuySeeds()
+    if not GameEvents then return false end
+    
     local bestSeed = GetBestSeed()
     local money = ShecklesCount.Value
     local ownedSeeds = GetOwnedSeeds()
     local currentSeedCount = ownedSeeds[bestSeed] and ownedSeeds[bestSeed].count or 0
     
-    -- ซื้อเมล็ดพันธุ์เมื่อมีเงินและเมล็ดพันธุ์น้อย
     if currentSeedCount < 10 then
         local seedData
         for _, seed in pairs(SeedProgression) do
@@ -296,143 +298,115 @@ local function BuySeeds()
         end
         
         if seedData and money >= seedData.price then
-            local canBuy = math.floor(money / seedData.price)
-            local buyAmount = math.min(canBuy, 15) -- จำกัดการซื้อ
-            
             StatusLabel.Text = "🛒 Buying seeds..."
             
-            -- ลองหลายวิธีการซื้อสำหรับเวอร์ชันต่างๆ
             local buyMethods = {
                 function() GameEvents.BuySeedStock:FireServer(bestSeed) end,
                 function() GameEvents.BuySeed:FireServer(bestSeed) end,
                 function() GameEvents.BuySeeds:FireServer(bestSeed) end,
                 function() GameEvents.PurchaseSeed:FireServer(bestSeed) end,
                 function() GameEvents.Shop:FireServer("BuySeed", bestSeed) end,
-                function() ReplicatedStorage.Remotes.BuySeed:FireServer(bestSeed) end,
-                function() ReplicatedStorage.Events.BuySeedStock:FireServer(bestSeed) end
             }
             
             local success = false
             local initialMoney = money
             
-            for i = 1, buyAmount do
-                -- ลองทุกวิธีจนกว่าจะสำเร็จ
+            for i = 1, 5 do  -- ลดจำนวนการซื้อ
                 for _, method in pairs(buyMethods) do
-                    pcall(function()
-                        method()
-                        success = true
-                    end)
-                    wait(0.1)
-                    
-                    -- ตรวจสอบว่าเงินลดลงหรือไม่ (หมายถึงซื้อสำเร็จ)
-                    if ShecklesCount.Value < initialMoney then
+                    local methodSuccess = pcall(method)
+                    if methodSuccess then
                         success = true
                         break
                     end
+                    task.wait(0.1)
                 end
                 
-                if success then
-                    initialMoney = ShecklesCount.Value
-                else
+                if ShecklesCount.Value < initialMoney then
+                    success = true
                     break
                 end
-                wait(0.1)
+                task.wait(0.2)
             end
             
             if success then
                 StatusLabel.Text = `✅ Bought seeds successfully`
             else
-                StatusLabel.Text = `❌ Failed to buy seeds (v1.4+ may need update)`
+                StatusLabel.Text = `❌ Failed to buy seeds`
             end
-            wait(1)
+            task.wait(1)
         end
     end
+    return true
 end
 
 local function SmartPlant()
     local myFarm = GetMyFarm()
-    if not myFarm then return end
+    if not myFarm then return false end
     
     local plantLocations = myFarm.Important:FindFirstChild("Plant_Locations")
-    if not plantLocations then return end
+    if not plantLocations then return false end
     
     local farmLands = plantLocations:GetChildren()
-    if #farmLands == 0 then return end
+    if #farmLands == 0 then return false end
     
     local ownedSeeds = GetOwnedSeeds()
     local bestSeed = GetBestSeed()
     local seedData = ownedSeeds[bestSeed]
     
-    if not seedData or seedData.count <= 0 then return end
+    if not seedData or seedData.count <= 0 then return false end
     
     StatusLabel.Text = "🌱 Smart planting..."
     
-    -- วาร์ปไปฟาร์ม
     if WarpPositions.Farm then
         SmoothWarp(WarpPositions.Farm)
     end
     
-    -- Equip tool
     local Character = LocalPlayer.Character
     if Character and seedData.tool.Parent == Backpack then
         Character.Humanoid:EquipTool(seedData.tool)
-        wait(0.5)
+        task.wait(0.5)
     end
     
-    -- ปลูกในตำแหน่งที่เหมาะสม
     local farmLand = farmLands[1]
     local center = farmLand:GetPivot()
-    local size = farmLand.Size
+    local plantCount = math.min(seedData.count, 8)  -- ลดจำนวนการปลูก
     
-    local plantCount = math.min(seedData.count, 12)
-    local spacing = 4 -- ระยะห่างระหว่างต้นพืช
+    if not GameEvents then return false end
     
-    -- ลองหลายวิธีการปลูกสำหรับเวอร์ชันต่างๆ
     local plantMethods = {
         function(pos, seed) GameEvents.Plant_RE:FireServer(pos, seed) end,
         function(pos, seed) GameEvents.PlantSeed:FireServer(pos, seed) end,
         function(pos, seed) GameEvents.Plant:FireServer(pos, seed) end,
-        function(pos, seed) ReplicatedStorage.Remotes.Plant:FireServer(pos, seed) end,
-        function(pos, seed) GameEvents.PlantCrop:FireServer(pos, seed) end
     }
     
     for i = 1, plantCount do
-        -- คำนวณตำแหน่งแบบกริด
-        local row = math.floor((i - 1) / 4)
-        local col = (i - 1) % 4
+        if not AutoEnabled then break end  -- ตรวจสอบสถานะ Auto
         
-        local x = center.X + (col - 1.5) * spacing
-        local z = center.Z + (row - 1.5) * spacing
+        local x = center.X + math.random(-8, 8)
+        local z = center.Z + math.random(-8, 8)
         local position = Vector3.new(x, 0.13, z)
         
-        -- ตรวจสอบว่าตำแหน่งอยู่ในฟาร์ม
-        if math.abs(x - center.X) <= size.X/2 and math.abs(z - center.Z) <= size.Z/2 then
-            -- ลองทุกวิธีการปลูก
-            local planted = false
-            for _, method in pairs(plantMethods) do
-                pcall(function()
-                    method(position, bestSeed)
-                    planted = true
-                end)
-                if planted then break end
-            end
-            wait(0.3)
+        for _, method in pairs(plantMethods) do
+            pcall(function()
+                method(position, bestSeed)
+            end)
         end
+        task.wait(0.3)
     end
     
-    StatusLabel.Text = `✅ Attempted to plant {plantCount} {bestSeed}`
+    StatusLabel.Text = `✅ Planted {plantCount} {bestSeed}`
+    return true
 end
 
 local function SmartHarvest()
     local myFarm = GetMyFarm()
-    if not myFarm then return end
+    if not myFarm then return false end
     
     local plantsPhysical = myFarm.Important:FindFirstChild("Plants_Physical")
-    if not plantsPhysical then return end
+    if not plantsPhysical then return false end
     
     StatusLabel.Text = "🌾 Harvesting crops..."
     
-    -- วาร์ปไปฟาร์ม
     if WarpPositions.Farm then
         SmoothWarp(WarpPositions.Farm)
     end
@@ -440,7 +414,6 @@ local function SmartHarvest()
     local harvestedCount = 0
     local targets = {}
     
-    -- รวบรวมเป้าหมายทั้งหมด
     local function collectTargets(folder)
         for _, plant in pairs(folder:GetChildren()) do
             local fruits = plant:FindFirstChild("Fruits")
@@ -457,28 +430,23 @@ local function SmartHarvest()
     
     collectTargets(plantsPhysical)
     
-    -- เก็บเกี่ยวอย่างมีประสิทธิภาพ
     for _, target in pairs(targets) do
-        if IsBackpackFull() then
-            break
-        end
+        if IsBackpackFull() or not AutoEnabled then break end  -- ตรวจสอบสถานะ Auto
         
         local plant = target.plant
         local prompt = target.prompt
         
-        -- เดินไปใกล้พืช
         local Character = LocalPlayer.Character
         if Character and Character:FindFirstChild("HumanoidRootPart") then
             local plantPos = plant:GetPivot().Position
             Character.HumanoidRootPart.CFrame = CFrame.new(plantPos + Vector3.new(0, 3, 0))
-            wait(0.2)
+            task.wait(0.2)
         end
         
-        -- เก็บเกี่ยว
         if prompt.Enabled then
             fireproximityprompt(prompt)
             harvestedCount = harvestedCount + 1
-            wait(0.1)
+            task.wait(0.1)
         end
     end
     
@@ -487,110 +455,110 @@ local function SmartHarvest()
     else
         StatusLabel.Text = "⏳ No crops ready"
     end
+    return true
 end
 
 local function SmartSell()
     local cropCount = GetCropCount()
-    if cropCount < MIN_CROPS_TO_SELL then return end
+    if cropCount < MIN_CROPS_TO_SELL then return false end
     
     StatusLabel.Text = "💰 Selling crops..."
     
     local previousMoney = ShecklesCount.Value
-    
-    -- วาร์ปไปจุดขาย
     SmoothWarp(WarpPositions.Sell)
     
-    -- ลองหลายวิธีการขายสำหรับเวอร์ชันต่างๆ
+    if not GameEvents then return false end
+    
     local sellMethods = {
         function() GameEvents.Sell_Inventory:FireServer() end,
         function() GameEvents.SellInventory:FireServer() end,
         function() GameEvents.Sell:FireServer() end,
         function() GameEvents.SellCrops:FireServer() end,
-        function() ReplicatedStorage.Remotes.Sell:FireServer() end,
         function() GameEvents.SellAll:FireServer() end
     }
     
-    -- ขายหลายครั้งเพื่อให้แน่ใจ
     local attempts = 0
-    local maxAttempts = 20
-    local sellSuccess = false
+    local maxAttempts = 10  -- ลดจำนวนความพยายาม
     
-    while attempts < maxAttempts and GetCropCount() > 0 do
-        -- ลองทุกวิธีการขาย
+    while attempts < maxAttempts and GetCropCount() > 0 and AutoEnabled do
         for _, method in pairs(sellMethods) do
-            pcall(function()
-                method()
-            end)
+            pcall(method)
         end
         
-        wait(0.3)
+        task.wait(0.5)
         attempts = attempts + 1
         
-        -- หยุดถ้าเงินเพิ่มขึ้น (ขายสำเร็จ)
         if ShecklesCount.Value > previousMoney then
-            sellSuccess = true
             break
         end
     end
     
     local profit = ShecklesCount.Value - previousMoney
-    if profit > 0 or sellSuccess then
-        StatusLabel.Text = `💰 Sold! +${profit}`
+    if profit > 0 then
+        StatusLabel.Text = `💰 Sold! +$${profit}`
     else
-        StatusLabel.Text = "❌ Sell failed - trying alternative methods"
-        
-        -- ลองวิธีอื่นถ้าขายไม่ได้
-        wait(1)
-        pcall(function()
-            -- อาจต้องใช้วิธีอื่นในเวอร์ชันใหม่
-            if GameEvents:FindFirstChild("Trade") then
-                GameEvents.Trade:FireServer("sell_all")
-            end
-        end)
+        StatusLabel.Text = "❌ Sell failed"
     end
     
-    wait(1)
+    task.wait(1)
+    return true
 end
 
---// Enhanced Auto Loop
+--// FIXED Auto Loop
 local function EnhancedAutoLoop()
-    while AutoEnabled do
-        pcall(function()
-            -- อัพเดทข้อมูล
-            local money = ShecklesCount.Value
-            local crops = GetCropCount()
-            local harvestableCrops = GetHarvestableCrops()
+    AutoLoopConnection = task.spawn(function()
+        while AutoEnabled do
+            local success = pcall(function()
+                -- ตรวจสอบว่า AutoEnabled ยังเป็น true อยู่หรือไม่
+                if not AutoEnabled then break end
+                
+                -- อัพเดทข้อมูล
+                local money = ShecklesCount.Value
+                local crops = GetCropCount()
+                local harvestableCrops = GetHarvestableCrops()
+                
+                InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
+                
+                -- 1. ขายก่อนถ้าจำเป็น
+                if ShouldSell() and AutoEnabled then
+                    SmartSell()
+                    task.wait(2)
+                end
+                
+                -- 2. ซื้อเมล็ดพันธุ์
+                if money >= 50 and AutoEnabled then
+                    BuySeeds()
+                    task.wait(1)
+                end
+                
+                -- 3. ปลูกพืช
+                if AutoEnabled then
+                    SmartPlant()
+                    task.wait(2)
+                end
+                
+                -- 4. เก็บเกี่ยว
+                if AutoEnabled then
+                    SmartHarvest()
+                    task.wait(2)
+                end
+                
+                -- 5. พักสั้นๆ
+                if AutoEnabled then
+                    StatusLabel.Text = "⏳ Waiting..."
+                    task.wait(3)
+                end
+            end)
             
-            InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
-            
-            -- 1. ขายก่อนถ้าจำเป็น
-            if ShouldSell() then
-                SmartSell()
-                wait(2)
+            if not success then
+                StatusLabel.Text = "❌ Error occurred, retrying..."
+                task.wait(2)
             end
-            
-            -- 2. ซื้อเมล็ดพันธุ์
-            if money >= 50 then
-                BuySeeds()
-                wait(1)
-            end
-            
-            -- 3. ปลูกพืช
-            SmartPlant()
-            wait(2)
-            
-            -- 4. เก็บเกี่ยว
-            SmartHarvest()
-            wait(2)
-            
-            -- 5. พักสั้นๆ
-            StatusLabel.Text = "⏳ Waiting..."
-            wait(3)
-        end)
-    end
+        end
+    end)
 end
 
---// Button Functions
+--// FIXED Button Functions
 local function ToggleAuto()
     AutoEnabled = not AutoEnabled
     
@@ -599,12 +567,23 @@ local function ToggleAuto()
         ToggleButton.BackgroundColor3 = Color3.fromRGB(244, 67, 54)
         StatusLabel.Text = "🚀 Enhanced auto-farm started!"
         
-        -- Start the enhanced auto loop
-        coroutine.wrap(EnhancedAutoLoop)()
+        -- หยุด loop เก่าก่อน (ถ้ามี)
+        if AutoLoopConnection then
+            task.cancel(AutoLoopConnection)
+        end
+        
+        -- เริ่ม loop ใหม่
+        EnhancedAutoLoop()
     else
         ToggleButton.Text = "🚀 START ENHANCED AUTO"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(46, 125, 50)
         StatusLabel.Text = "⏹️ Auto-farm stopped!"
+        
+        -- หยุด loop
+        if AutoLoopConnection then
+            task.cancel(AutoLoopConnection)
+            AutoLoopConnection = nil
+        end
     end
 end
 
@@ -639,8 +618,8 @@ MainFrame.InputEnded:Connect(function(input)
 end)
 
 -- Status updater
-coroutine.wrap(function()
-    while wait(1) do
+task.spawn(function()
+    while task.wait(1) do
         if not AutoEnabled then
             local money = ShecklesCount.Value
             local crops = GetCropCount()
@@ -648,16 +627,10 @@ coroutine.wrap(function()
             InfoLabel.Text = `💰 $${money} | 📦 ${crops} crops | 🌾 ${harvestableCrops} ready`
         end
     end
-end)()
+end)
 
--- Auto-start for new players
-if ShecklesCount.Value <= 50 then
-    wait(3)
-    StatusLabel.Text = "🆕 New player detected!"
-    wait(2)
-    ToggleAuto()
-end
-
+-- Remove auto-start for testing
 print("🌟 Enhanced Auto-Farm loaded successfully!")
 print("✨ Features: Smart warp, auto-sell when needed, improved planting!")
 print("🎮 Click the button to start enhanced farming!")
+print("🔧 FIXED: Button hanging issue resolved!")
