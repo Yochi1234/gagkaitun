@@ -41,7 +41,7 @@ if not GameEvents then return print("❌ GameEvents not found") end
 -- Get my farm
 local function GetMyFarm()
     for _, v in Workspace:GetDescendants() do
-        if v:FindFirstChild("Important") and v:FindFirstChild("Important"):FindFirstChild("Data") then
+        if v:FindFirstChild("Important") and v.Important:FindFirstChild("Data") then
             local owner = v.Important.Data:FindFirstChild("Owner")
             if owner and owner.Value == LocalPlayer.Name then
                 return v
@@ -80,7 +80,45 @@ local function TryBuySeed(seedName)
     return bought
 end
 
--- Planting
+-- Equip tool function
+local function EquipTool(seedName)
+    local char = LocalPlayer.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+
+    local tool = LocalPlayer.Backpack:FindFirstChild(seedName)
+    if tool and tool.Parent ~= char then
+        humanoid:EquipTool(tool)
+        task.wait(0.2) -- รอ Equip ให้เรียบร้อย
+        return true
+    elseif tool and tool.Parent == char then
+        return true
+    else
+        return false
+    end
+end
+
+-- เช็คจำนวน Crops ในกระเป๋า
+local function GetCropCount()
+    local char = LocalPlayer.Character
+    local count = 0
+    if not char then return 0 end
+
+    local function countTools(parent)
+        for _, item in pairs(parent:GetChildren()) do
+            if item:IsA("Tool") and item:FindFirstChild("Item_String") then
+                count += 1
+            end
+        end
+    end
+
+    countTools(LocalPlayer.Backpack)
+    countTools(char)
+
+    return count
+end
+
+-- Planting seeds (ปลูกทีละจุดโดย Equip ก่อน)
 local function PlantSeed(seedName)
     local farm = WaitForMyFarm()
     if not farm then return end
@@ -92,10 +130,9 @@ local function PlantSeed(seedName)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Equip tool
-    local tool = LocalPlayer.Backpack:FindFirstChild(seedName)
-    if tool and char:FindFirstChildOfClass("Humanoid") then
-        char.Humanoid:EquipTool(tool)
+    if not EquipTool(seedName) then
+        print("❌ ไม่พบเมล็ดพันธุ์ในกระเป๋า: " .. seedName)
+        return
     end
 
     -- วาร์ปไปกลางฟาร์มก่อนปลูกทั้งหมด
@@ -116,23 +153,6 @@ local function PlantSeed(seedName)
             end
         end
         if planted >= 20 then break end -- จำกัดจำนวนปลูกต่อรอบ
-    end
-end
-
-    -- Warp near the dirt to avoid "too far"
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        char.HumanoidRootPart.CFrame = CFrame.new(dirtPos + Vector3.new(0, 2, 0))
-        task.wait(0.15)
-    end
-
-    for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
-        local event = GameEvents:FindFirstChild(evt)
-        if event then
-            print("🌱 Planting " .. seedName .. " via " .. evt)
-            event:FireServer(Vector3.new(dirtPos.X, dirtPos.Y, dirtPos.Z), seedName)
-            break
-        end
     end
 end
 
@@ -204,11 +224,20 @@ end
 local function FarmToTomato300()
     print("🚀 Starting Auto-Farm to 300 Tomatoes...")
     while true do
-        local tomatoes = CountTomato()
+        local tomatoes = CountTomatoes()
         print("🍅 Tomato Count: " .. tomatoes)
         if tomatoes >= 300 then
             print("✅ Reached 300 Tomato plants!")
             break
+        end
+
+        -- ถ้ากระเป๋าเต็ม (> 20) ให้ขายก่อน
+        local cropCount = GetCropCount()
+        if cropCount >= 20 then
+            print("📦 กระเป๋าเต็ม! กำลังขาย...")
+            Sell()
+            task.wait(0.3)
+            continue
         end
 
         local seedToUse = "Tomato"
@@ -218,7 +247,6 @@ local function FarmToTomato300()
             TryBuySeed("Carrot")
         end
 
-        -- ทำเป็นขั้นตอนชัดเจน
         PlantSeed(seedToUse)
         task.wait(0.2)
         Harvest()
@@ -229,4 +257,4 @@ local function FarmToTomato300()
 end
 
 -- Start farming
-FarmTo300Tomatoes()
+FarmToTomato300()
