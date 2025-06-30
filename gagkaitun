@@ -75,19 +75,31 @@ local function TryBuySeed(seed)
 end
 
 -- Planting
-local function PlantSeed(seed)
+local function PlantSeed(seedName)
     local farm = WaitForMyFarm()
-    if not farm then return end
-    local base = farm.Important:FindFirstChild("Plant_Locations")
-    if not base then return end
-    local land = base:GetChildren()[1]
-    if not land then return end
+    if not farm then print("⚠️ No farm found") return end
+    local pos = farm:GetPivot().Position + Vector3.new(0, 0.13, 0)
 
-    local pos = land.Position + Vector3.new(0, 0.1, 0)
-    for _, e in {"Plant_RE", "Plant", "PlantSeed"} do
-        local evt = GameEvents:FindFirstChild(e)
-        if evt then
-            evt:FireServer(pos, seed)
+    -- Equip the seed tool if it exists
+    local tool = LocalPlayer.Backpack:FindFirstChild(seedName) or LocalPlayer.Character:FindFirstChild(seedName)
+    if tool then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:EquipTool(tool)
+        end
+    end
+
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 2.5, 0))
+        task.wait(0.1)
+    end
+
+    for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
+        local event = GameEvents:FindFirstChild(evt)
+        if event then
+            print("🌱 Planting " .. seedName .. " via " .. evt)
+            event:FireServer(Vector3.new(pos.X, pos.Y, pos.Z), seedName)
             break
         end
     end
@@ -97,18 +109,30 @@ end
 local function Harvest()
     local farm = WaitForMyFarm()
     if not farm then return end
-    local physical = farm.Important:FindFirstChild("Plants_Physical")
-    if not physical then return end
+    local plants = farm.Important:FindFirstChild("Plants_Physical")
+    if not plants then return end
 
-    for _, crop in pairs(physical:GetChildren()) do
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local count = 0
+    for _, crop in pairs(plants:GetChildren()) do
         local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt and prompt.Enabled then
-            for _ = 1, 2 do
-                pcall(function() fireproximityprompt(prompt) end)
-                task.wait(0.05)
+            local pos = crop:GetPivot().Position
+            local distance = (hrp.Position - pos).Magnitude
+            if distance > 9 then
+                hrp.CFrame = CFrame.new(pos + Vector3.new(0, 1.5, 0))
+                task.wait(0.2)
             end
+            pcall(function() fireproximityprompt(prompt) end)
+            count += 1
+            task.wait(0.1)
         end
     end
+    print("🌾 Harvested " .. count .. " crops")
 end
 
 -- Sell
