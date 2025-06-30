@@ -57,18 +57,22 @@ local function GetMyFarm()
     return nil
 end
 
--- Farming Functions
-local function BuySeed(seedName)
+-- Try buy seed and return success
+local function TryBuySeed(seedName)
     for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
         local event = GameEvents:FindFirstChild(evt)
         if event then
-            print("🛒 Buying seed: " .. seedName .. " via " .. evt)
-            event:FireServer(seedName)
-            break
+            local success = pcall(function()
+                print("🛒 Buying seed: " .. seedName .. " via " .. evt)
+                event:FireServer(seedName)
+            end)
+            if success then return true end
         end
     end
+    return false
 end
 
+-- Farming Functions
 local function PlantSeed(seedName)
     local farm = GetMyFarm()
     if not farm then print("⚠️ No farm found") return end
@@ -144,27 +148,20 @@ local function FarmToTomato300()
             break
         end
 
-        if Sheckles.Value < 30 then
-            print("💸 Low money, farming carrot...")
-            BuySeed("Carrot")
-            task.wait(1)
-            PlantSeed("Carrot")
-            task.wait(1)
-            Harvest()
-            task.wait(1)
-            Sell()
-            task.wait(2)
-        else
-            print("💰 Farming tomato...")
-            BuySeed("Tomato")
-            task.wait(1)
-            PlantSeed("Tomato")
-            task.wait(1)
-            Harvest()
-            task.wait(1)
-            Sell()
-            task.wait(2)
+        local seedToUse = "Tomato"
+        if Sheckles.Value < 30 or not TryBuySeed("Tomato") then
+            print("🔄 Tomato unavailable or low money, using Carrot...")
+            seedToUse = "Carrot"
+            TryBuySeed("Carrot")
         end
+
+        task.wait(1)
+        PlantSeed(seedToUse)
+        task.wait(1)
+        Harvest()
+        task.wait(1)
+        Sell()
+        task.wait(2)
     end
 end
 
