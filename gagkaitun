@@ -86,16 +86,37 @@ local function EquipTool(seedName)
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
     if not humanoid then return false end
 
+    -- หา tool ทั้งใน Backpack และ Character
     local tool = LocalPlayer.Backpack:FindFirstChild(seedName)
-    if tool and tool.Parent ~= char then
-        humanoid:EquipTool(tool)
-        task.wait(0.2) -- รอ Equip ให้เรียบร้อย
-        return true
-    elseif tool and tool.Parent == char then
-        return true
-    else
+    if not tool then
+        tool = char:FindFirstChild(seedName)
+    end
+
+    -- ถ้ายังไม่เจอ ลองเช็คชื่อ Tool ทั้งหมดใน Backpack กับ Character แล้วแสดงชื่อที่เจอ (debug)
+    if not tool then
+        print("🔍 Tool '" .. seedName .. "' ไม่พบใน Backpack หรือ Character, มีไอเท็มดังนี้:")
+        for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+            if item:IsA("Tool") then
+                print("Backpack Tool: " .. item.Name)
+            end
+        end
+        for _, item in pairs(char:GetChildren()) do
+            if item:IsA("Tool") then
+                print("Character Tool: " .. item.Name)
+            end
+        end
         return false
     end
+
+    -- ถ้า Tool อยู่ในตัวละครแล้ว
+    if tool.Parent == char then
+        return true -- ถืออยู่แล้ว
+    end
+
+    -- ถ้า Tool อยู่ใน Backpack ให้ Equip
+    humanoid:EquipTool(tool)
+    task.wait(0.2) -- รอ Equip ให้เรียบร้อย
+    return true
 end
 
 -- เช็คจำนวน Crops ในกระเป๋า
