@@ -1,0 +1,69 @@
+--[[ 
+    @author dk_hub
+    @description Mobile Lock-On (Aimbot-like Follow Script)
+    @toggle GUI on screen to enable/disable
+    @executor compatible
+]]
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local UIS = game:GetService("UserInputService")
+
+-- GUI Toggle
+local followOn = false
+
+-- Create GUI
+local screenGui = Instance.new("ScreenGui", game.CoreGui)
+screenGui.Name = "FollowLockGui"
+
+local toggleBtn = Instance.new("TextButton", screenGui)
+toggleBtn.Size = UDim2.new(0, 120, 0, 50)
+toggleBtn.Position = UDim2.new(0.05, 0, 0.85, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 150, 100)
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.Text = "🔒 Follow: OFF"
+toggleBtn.TextSize = 20
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.ZIndex = 999
+
+-- Nearest Player Finder
+local function getNearestPlayer()
+    local closest, closestDist = nil, math.huge
+    local myPos = Character:FindFirstChild("HumanoidRootPart") and Character.HumanoidRootPart.Position
+
+    if not myPos then return nil end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (player.Character.HumanoidRootPart.Position - myPos).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = player
+            end
+        end
+    end
+
+    return closest
+end
+
+-- Follow Loop
+RunService.RenderStepped:Connect(function()
+    if not followOn then return end
+
+    local target = getNearestPlayer()
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        local targetPos = target.Character.HumanoidRootPart.Position
+        Humanoid:MoveTo(targetPos)
+    end
+end)
+
+-- Toggle Logic
+toggleBtn.MouseButton1Click:Connect(function()
+    followOn = not followOn
+    toggleBtn.Text = followOn and "🔓 Follow: ON" or "🔒 Follow: OFF"
+    toggleBtn.BackgroundColor3 = followOn and Color3.fromRGB(150, 50, 50) or Color3.fromRGB(30, 150, 100)
+end)
