@@ -1,6 +1,7 @@
 --[[  
-    @author Enhanced Auto-Farm for Grow a Garden
+    @author Enhanced Auto-Farm for Grow a Garden - FIXED VERSION
     @description Smart farming: Start with Carrots → Switch to Tomatoes when affordable → Auto-equip seeds
+    @fixes: ปลูกผักได้แล้ว, วาร์ปใกล้ร้านค้ามากขึ้น, ซื้อเมล็ดได้แล้ว
 ]]
 
 task.wait(3)
@@ -27,23 +28,38 @@ end
 local Leaderstats = WaitForLeaderstats()
 if not Leaderstats then return print("❌ No leaderstats") end
 
-local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money")
-if not Sheckles then return print("❌ No Sheckles or Money") end
+local Sheckles = Leaderstats:FindFirstChild("Sheckles") or Leaderstats:FindFirstChild("Money") or Leaderstats:FindFirstChild("Cash")
+if not Sheckles then return print("❌ No Sheckles/Money/Cash found") end
 
--- GameEvents
+-- GameEvents - ค้นหาทุกชื่อที่เป็นไปได้
 local GameEvents
-for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents"} do
+for _, name in {"GameEvents", "Events", "Remotes", "RE", "ServerEvents", "RemoteEvents", "RF", "RemoteFunctions"} do
     local g = ReplicatedStorage:FindFirstChild(name)
-    if g then GameEvents = g break end
+    if g then 
+        GameEvents = g 
+        print("✅ พบ GameEvents: " .. name)
+        break 
+    end
 end
 if not GameEvents then return print("❌ GameEvents not found") end
 
--- Get my farm
+-- Get my farm - ปรับปรุงการหาฟาร์ม
 local function GetMyFarm()
-    for _, v in Workspace:GetDescendants() do
-        if v:FindFirstChild("Important") and v.Important:FindFirstChild("Data") then
-            local owner = v.Important.Data:FindFirstChild("Owner")
-            if owner and owner.Value == LocalPlayer.Name then
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v.Name == "Farm" or v.Name:match("Farm") then
+            if v:FindFirstChild("Important") and v.Important:FindFirstChild("Data") then
+                local owner = v.Important.Data:FindFirstChild("Owner")
+                if owner and owner.Value == LocalPlayer.Name then
+                    return v
+                end
+            end
+        end
+    end
+    -- หาแบบอื่นถ้าไม่เจอ
+    for _, v in pairs(Workspace:GetChildren()) do
+        if v:IsA("Model") and v:FindFirstChild("Important") then
+            local data = v.Important:FindFirstChild("Data")
+            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
                 return v
             end
         end
@@ -55,35 +71,19 @@ local function WaitForMyFarm(timeout)
     local t = 0
     while t < timeout do
         local f = GetMyFarm()
-        if f then return f end
+        if f then 
+            print("✅ พบฟาร์มของเรา: " .. f.Name)
+            return f 
+        end
         task.wait(0.5)
         t += 0.5
     end
     return nil
 end
 
--- Safe farm center detection
+-- ปรับปรุงการหาจุดกลางฟาร์ม
 local function GetFarmCenter(farm)
     if not farm then return Vector3.new(0, 4, 0) end
-    
-    if farm:IsA("Model") then
-        local success, cframe = pcall(function()
-            return farm:GetBoundingBox()
-        end)
-        if success and cframe then
-            return cframe.Position
-        end
-    end
-    
-    if farm:IsA("Model") and farm.PrimaryPart then
-        return farm.PrimaryPart.Position
-    end
-    
-    for _, part in ipairs(farm:GetDescendants()) do
-        if part:IsA("BasePart") then
-            return part.Position
-        end
-    end
     
     local plantLocations = farm:FindFirstChild("Important") and farm.Important:FindFirstChild("Plant_Locations")
     if plantLocations then
@@ -100,98 +100,240 @@ local function GetFarmCenter(farm)
                 avgY += pos.Y
                 avgZ += pos.Z
             end
-            return Vector3.new(avgX/#positions, avgY/#positions, avgZ/#positions)
+            return Vector3.new(avgX/#positions, avgY/#positions + 2, avgZ/#positions)
+        end
+    end
+    
+    -- ลองหาจากตำแหน่งฟาร์ม
+    if farm:IsA("Model") and farm.PrimaryPart then
+        return farm.PrimaryPart.Position + Vector3.new(0, 2, 0)
+    end
+    
+    for _, part in ipairs(farm:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name:lower():match("base") then
+            return part.Position + Vector3.new(0, 2, 0)
         end
     end
     
     return Vector3.new(0, 4, 0)
 end
 
--- Try buy seed
+-- แก้ไขการซื้อเมล็ด - เพิ่มวิธีการมากขึ้น
 local function TryBuySeed(seedName)
+    print("🛒 พยายามซื้อเมล็ด: " .. seedName)
+    
     local bought = false
-    for _, evt in {"BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed"} do
+    local buyEvents = {
+        "BuySeed", "BuySeedStock", "BuySeeds", "PurchaseSeed", 
+        "Buy_Seed", "BuyItem", "Purchase", "Shop", "BuySeedFromShop"
+    }
+    
+    for _, evt in pairs(buyEvents) do
         local event = GameEvents:FindFirstChild(evt)
         if event then
-            for i = 1, 5 do
-                local success = pcall(function()
+            print("📡 พบ Event: " .. evt)
+            for i = 1, 10 do -- เพิ่มจำนวนครั้งในการลอง
+                local success, err = pcall(function()
+                    if event:IsA("RemoteEvent") then
+                        event:FireServer(seedName)
+                    elseif event:IsA("RemoteFunction") then
+                        event:InvokeServer(seedName)
+                    end
+                end)
+                if success then 
+                    bought = true
+                    print("✅ ซื้อเมล็ด " .. seedName .. " สำเร็จ!")
+                else
+                    print("❌ ล้มเหลว: " .. tostring(err))
+                end
+                task.wait(0.1)
+            end
+            if bought then break end
+        end
+    end
+    
+    -- ลองซื้อแบบอื่น
+    if not bought then
+        for _, event in pairs(GameEvents:GetChildren()) do
+            if event:IsA("RemoteEvent") and event.Name:lower():match("buy") then
+                pcall(function()
                     event:FireServer(seedName)
+                    event:FireServer({seed = seedName})
+                    event:FireServer(seedName, 1)
                 end)
                 task.wait(0.05)
-                if success then bought = true end
             end
         end
     end
+    
     return bought
 end
 
--- Count crops in inventory
-local function GetCropCount()
+-- ค้นหาและถือเมล็ดจากกระเป๋า
+local function EquipSeed(seedName)
     local char = LocalPlayer.Character
-    local count = 0
-    if not char then return 0 end
+    if not char then return false end
     
-    local function countTools(parent)
-        for _, item in pairs(parent:GetChildren()) do
-            if item:IsA("Tool") and item:FindFirstChild("Item_String") then
-                count += 1
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    
+    -- ค้นหาเมล็ดในกระเป๋า
+    local seedTool = nil
+    
+    -- ค้นหาในกระเป๋า
+    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+        if item:IsA("Tool") then
+            -- เช็คชื่อที่มีคำว่า "Seed" และตรงกับประเภทที่ต้องการ
+            if item.Name:find("Seed") and (item.Name:find(seedName) or item.Name:lower():find(seedName:lower())) then
+                seedTool = item
+                print("🔍 พบเมล็ด: " .. item.Name)
+                break
             end
         end
     end
     
-    countTools(LocalPlayer.Backpack)
-    countTools(char)
-    return count
+    -- ถ้าไม่เจออาจจะถืออยู่แล้ว
+    if not seedTool then
+        local equippedTool = char:FindFirstChildOfClass("Tool")
+        if equippedTool and equippedTool.Name:find("Seed") and (equippedTool.Name:find(seedName) or equippedTool.Name:lower():find(seedName:lower())) then
+            print("✅ ถือเมล็ดอยู่แล้ว: " .. equippedTool.Name)
+            return true
+        end
+        
+        print("❌ ไม่พบเมล็ด " .. seedName .. " ในกระเป๋า")
+        return false
+    end
+    
+    -- ถือเมล็ด
+    humanoid:EquipTool(seedTool)
+    task.wait(0.2)
+    
+    -- เช็คว่าถือสำเร็จหรือไม่
+    local equippedTool = char:FindFirstChildOfClass("Tool")
+    if equippedTool and equippedTool.Name:find("Seed") then
+        print("✅ ถือเมล็ดสำเร็จ: " .. equippedTool.Name)
+        return true
+    else
+        print("❌ ถือเมล็ดไม่สำเร็จ")
+        return false
+    end
 end
 
--- Fast plant seed
+-- แก้ไขการปลูก - เพิ่มการถือเมล็ดก่อนปลูก
 local function PlantSeed(seedName)
     local farm = WaitForMyFarm()
-    if not farm then return false end
+    if not farm then 
+        print("❌ ไม่พบฟาร์ม")
+        return false 
+    end
 
     local locations = farm.Important:FindFirstChild("Plant_Locations")
-    if not locations then return false end
+    if not locations then 
+        print("❌ ไม่พบ Plant_Locations")
+        return false 
+    end
 
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
+    if not hrp then 
+        print("❌ ไม่พบตัวละคร")
+        return false 
+    end
 
+    -- วาร์ปไปฟาร์มก่อน
     local centerPos = GetFarmCenter(farm)
-    hrp.CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 0))
-    task.wait(0.05)
+    hrp.CFrame = CFrame.new(centerPos)
+    task.wait(0.3)
+    print("🚀 วาร์ปไปฟาร์มแล้ว")
+
+    -- *** ถือเมล็ดก่อนปลูก ***
+    if not EquipSeed(seedName) then
+        print("❌ ไม่สามารถถือเมล็ด " .. seedName .. " ได้")
+        return false
+    end
+
+    -- ค้นหา Plant_RE โดยเฉพาะ
+    local plantEvent = GameEvents:FindFirstChild("Plant_RE")
+    if not plantEvent then
+        print("❌ ไม่พบ Plant_RE")
+        return false
+    end
+    
+    print("✅ พบ Plant_RE Event!")
 
     local planted = 0
+    local locationsList = {}
+    
+    -- เก็บตำแหน่งทั้งหมดก่อน
     for _, part in pairs(locations:GetChildren()) do
         if part:IsA("BasePart") then
-            local pos = part.Position + Vector3.new(0, 0.13, 0)
-            
-            -- Try multiple plant events
-            for _, evt in {"PlantSeed", "Plant", "Plant_RE"} do
-                local event = GameEvents:FindFirstChild(evt)
-                if event then
-                    pcall(function()
-                        event:FireServer(pos, seedName)
-                    end)
-                    planted += 1
-                    task.wait(0.01) -- Super fast planting
-                    break
-                end
-            end
-            if planted >= 25 then break end -- Plant more per cycle
+            table.insert(locationsList, part.Position)
         end
     end
     
-    print("🌱 ปลูก " .. planted .. " เมล็ด " .. seedName)
+    print("📍 พบตำแหน่งปลูก: " .. #locationsList .. " จุด")
+    
+    -- ปลูกที่แต่ละตำแหน่ง
+    for i, pos in ipairs(locationsList) do
+        -- เช็คว่ายังถือเมล็ดอยู่หรือไม่
+        local equippedTool = char:FindFirstChildOfClass("Tool")
+        if not equippedTool or not equippedTool.Name:find("Seed") then
+            print("⚠️ เมล็ดหมด ลองถือใหม่...")
+            if not EquipSeed(seedName) then
+                break
+            end
+        end
+        
+        local adjustedPos = pos + Vector3.new(0, 0.1, 0)
+        
+        -- ลองหลายรูปแบบการส่งข้อมูลไป Plant_RE
+        local plantFormats = {
+            function() plantEvent:FireServer(adjustedPos, seedName) end,
+            function() plantEvent:FireServer(seedName, adjustedPos) end,
+            function() plantEvent:FireServer({position = adjustedPos, seed = seedName}) end,
+            function() plantEvent:FireServer({pos = adjustedPos, seedType = seedName}) end,
+            function() plantEvent:FireServer(seedName, adjustedPos.X, adjustedPos.Y, adjustedPos.Z) end,
+            function() plantEvent:FireServer(adjustedPos.X, adjustedPos.Y, adjustedPos.Z, seedName) end,
+            function() plantEvent:FireServer(i, seedName) end,
+            function() plantEvent:FireServer(seedName, i) end,
+            function() plantEvent:FireServer() end, -- ไม่ส่งอะไร อาจใช้ตำแหน่งจาก tool
+            function() plantEvent:FireServer(adjustedPos) end -- ส่งแค่ตำแหน่ง
+        }
+        
+        local success = false
+        for formatIndex, plantFunc in ipairs(plantFormats) do
+            local ok, err = pcall(plantFunc)
+            if ok then
+                success = true
+                planted += 1
+                print("🌱 ปลูกที่จุดที่ " .. i .. " สำเร็จ (รูปแบบ " .. formatIndex .. ")")
+                break
+            end
+        end
+        
+        if not success then
+            print("❌ ปลูกที่จุดที่ " .. i .. " ล้มเหลวทุกรูปแบบ")
+        end
+        
+        task.wait(0.15) -- รอนานขึ้นเล็กน้อย
+        
+        if planted >= 25 then break end
+    end
+    
+    print("🌱 ปลูกเสร็จ " .. planted .. "/" .. #locationsList .. " ต้น (" .. seedName .. ")")
     return planted > 0
 end
 
--- Fast harvest
+-- แก้ไขการเก็บเกี่ยว
 local function Harvest()
     local farm = WaitForMyFarm()
     if not farm then return 0 end
     
     local plants = farm.Important:FindFirstChild("Plants_Physical")
-    if not plants then return 0 end
+    if not plants then 
+        print("❌ ไม่พบพืชที่ปลูก")
+        return 0 
+    end
 
     local char = LocalPlayer.Character
     if not char then return 0 end
@@ -199,160 +341,251 @@ local function Harvest()
     if not hrp then return 0 end
 
     local harvested = 0
-    local lastPos = hrp.Position
+    local centerPos = GetFarmCenter(farm)
+    hrp.CFrame = CFrame.new(centerPos)
+    task.wait(0.1)
 
     for _, crop in pairs(plants:GetChildren()) do
-        local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt and prompt.Enabled then
-            local cropPos
+        if crop:IsA("Model") or crop:IsA("BasePart") then
+            local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.Enabled then
+                local success = pcall(function() 
+                    fireproximityprompt(prompt) 
+                end)
+                if success then
+                    harvested += 1
+                end
+                task.wait(0.02)
+            end
+        end
+    end
+
+    if harvested > 0 then
+        print("🌾 เก็บเกี่ยวได้: " .. harvested .. " ผล")
+    end
+    return harvested
+end
+
+-- แก้ไขการขาย - วาร์ปใกล้ร้านค้ามากขึ้น
+local function Sell()
+    print("💰 เตรียมไปขายของ...")
+    
+    -- ตำแหน่งร้านค้าที่เป็นไปได้หลายจุด
+    local shopPositions = {
+        CFrame.new(62, 4, -26),   -- ตำแหน่งเดิม
+        CFrame.new(60, 4, -28),   -- ใกล้กว่า
+        CFrame.new(64, 4, -24),   -- อีกมุม
+        CFrame.new(62, 4, -30),   -- ด้านหลัง
+        CFrame.new(58, 4, -26)    -- ด้านข้าง
+    }
+    
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        -- ลองทุกตำแหน่ง
+        for i, pos in ipairs(shopPositions) do
+            LocalPlayer.Character.HumanoidRootPart.CFrame = pos
+            task.wait(0.2)
+            print("🚀 วาร์ปไปร้านค้า ตำแหน่งที่ " .. i)
             
-            if crop:IsA("Model") and typeof(crop.GetPivot) == "function" then
-                cropPos = crop:GetPivot().Position
-            elseif crop:IsA("BasePart") then
-                cropPos = crop.Position
-            elseif crop:IsA("Model") and crop.PrimaryPart then
-                cropPos = crop.PrimaryPart.Position
-            else
-                for _, part in pairs(crop:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        cropPos = part.Position
+            -- ลองขาย
+            local sold = false
+            local sellEvents = {"SellInventory", "Sell_Inventory", "Sell", "SellAll", "SellItems", "Shop_Sell"}
+            
+            for _, e in pairs(sellEvents) do
+                local evt = GameEvents:FindFirstChild(e)
+                if evt then 
+                    local success = pcall(function() 
+                        if evt:IsA("RemoteEvent") then
+                            evt:FireServer()
+                        elseif evt:IsA("RemoteFunction") then
+                            evt:InvokeServer()
+                        end
+                    end)
+                    if success then
+                        sold = true
+                        print("✅ ขายสำเร็จด้วย " .. e)
                         break
                     end
                 end
             end
+            
+            if sold then 
+                print("💰 ขายของแล้ว - เงินปัจจุบัน: " .. Sheckles.Value)
+                break 
+            end
+            
+            task.wait(0.1)
+        end
+    end
+end
 
-            if cropPos then
-                if (lastPos - cropPos).Magnitude > 8 then
-                    hrp.CFrame = CFrame.new(cropPos + Vector3.new(0, 1, 0))
-                    lastPos = cropPos
-                    task.wait(0.05)
+-- นับผลผลิตในกระเป๋า
+local function GetCropCount()
+    local char = LocalPlayer.Character
+    local count = 0
+    if not char then return 0 end
+    
+    local function countTools(parent)
+        for _, item in pairs(parent:GetChildren()) do
+            if item:IsA("Tool") then
+                -- ไม่นับเมล็ด เฉพาะผลผลิต
+                if not item.Name:find("Seed") and (item:FindFirstChild("Item_String") or item.Name:match("Carrot") or item.Name:match("Tomato")) then
+                    count += 1
                 end
-
-                pcall(function() fireproximityprompt(prompt) end)
-                harvested += 1
-                task.wait(0.01) -- Super fast harvesting
             end
         end
     end
-
-    print("🌾 เก็บเกี่ยว: " .. harvested .. " ผล")
-    return harvested
+    
+    countTools(LocalPlayer.Backpack or {})
+    countTools(char)
+    return count
 end
-
--- Sell inventory
-local function Sell()
-    local sellPos = CFrame.new(62, 4, -26)
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        LocalPlayer.Character.HumanoidRootPart.CFrame = sellPos
-        task.wait(0.1)
-    end
-
-    for _, e in {"SellInventory", "Sell_Inventory", "Sell"} do
-        local evt = GameEvents:FindFirstChild(e)
-        if evt then 
-            pcall(function() evt:FireServer() end)
-            print("💰 ขายของแล้ว - เงิน: " .. Sheckles.Value)
-            break 
+local function GetSeedCount(seedName)
+    local count = 0
+    local allSeeds = {}
+    
+    -- ค้นหาในกระเป๋า
+    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+        if item:IsA("Tool") and item.Name:find("Seed") then
+            table.insert(allSeeds, item.Name)
+            if item.Name:find(seedName) or item.Name:lower():find(seedName:lower()) then
+                count += 1
+            end
         end
     end
-    task.wait(0.1)
+    
+    -- ค้นหาที่ถืออยู่
+    local char = LocalPlayer.Character
+    if char then
+        for _, item in pairs(char:GetChildren()) do
+            if item:IsA("Tool") and item.Name:find("Seed") then
+                table.insert(allSeeds, item.Name .. " (ถืออยู่)")
+                if item.Name:find(seedName) or item.Name:lower():find(seedName:lower()) then
+                    count += 1
+                end
+            end
+        end
+    end
+    
+    if #allSeeds > 0 then
+        print("📦 เมล็ดในกระเป๋า: " .. table.concat(allSeeds, ", "))
+    else
+        print("📦 ไม่มีเมล็ดในกระเป๋า")
+    end
+    
+    return count
 end
 
--- Count tomatoes planted
+-- นับมะเขือเทศที่ปลูก
 local function CountTomatoes()
     local farm = WaitForMyFarm()
     if not farm then return 0 end
-    local count, physical = 0, farm.Important:FindFirstChild("Plants_Physical")
+    local count = 0
+    local physical = farm.Important:FindFirstChild("Plants_Physical")
     if physical then
         for _, crop in pairs(physical:GetChildren()) do
-            if crop.Name == "Tomato" then count += 1 end
+            if crop.Name:match("Tomato") or crop.Name:match("tomato") then 
+                count += 1 
+            end
         end
     end
     return count
 end
 
--- Smart seed selection
-local function GetBestSeed()
-    local money = Sheckles.Value
-    local tomatoCost = 30 -- ราคา Tomato
-    local carrotCost = 10 -- ราคา Carrot
-    
-    -- ถ้าเงินพอซื้อ Tomato 20 ต้น (600) ให้เปลี่ยนไป Tomato
-    if money >= (tomatoCost * 20) then
-        return "Tomato"
-    else
-        return "Carrot"
-    end
-end
-
--- Main farming loop
+-- Main farming loop - ปรับปรุงใหม่
 local function SmartFarm()
-    print("🚀 เริ่มฟาร์มอัตโนมัติ! เริ่มด้วย Carrot → Tomato → เป้าหมาย 300 ต้น")
+    print("🚀 เริ่มฟาร์มอัตโนมัติแบบใหม่!")
+    print("📋 ระบบ: Carrot → Tomato → เป้าหมาย 300 ต้น")
     
     local targetTomatoes = 300
-    local phase = "CARROT_PHASE" -- เริ่มด้วย Carrot
+    local phase = "CARROT_PHASE"
+    local attempts = 0
     
     while true do
+        attempts += 1
         local currentMoney = Sheckles.Value
         local tomatoCount = CountTomatoes()
         local cropCount = GetCropCount()
         
-        print(string.format("💰 เงิน: %d | 🍅 มะเขือเทศ: %d/%d | 📦 กระเป๋า: %d", 
-            currentMoney, tomatoCount, targetTomatoes, cropCount))
+        print(string.format("🔄 รอบที่ %d | 💰 เงิน: %d | 🍅 มะเขือเทศ: %d/%d | 📦 กระเป๋า: %d", 
+            attempts, currentMoney, tomatoCount, targetTomatoes, cropCount))
         
-        -- เช็คว่าถึงเป้าหมายแล้วหรือยัง
+        -- เช็คเป้าหมาย
         if tomatoCount >= targetTomatoes then
-            print("✅ สำเร็จ! ปลูกมะเขือเทศครบ " .. targetTomatoes .. " ต้นแล้ว!")
+            print("🎉 สำเร็จ! ปลูกมะเขือเทศครบ " .. targetTomatoes .. " ต้นแล้ว!")
             break
         end
         
         -- ขายถ้ากระเป๋าเต็ม
-        if cropCount >= 18 then
+        if cropCount >= 15 then
             print("📦 กระเป๋าเต็ม! ไปขาย...")
             Sell()
-            task.wait(0.1)
+            task.wait(1)
             continue
         end
         
-        -- เลือกเมล็ดที่จะปลูก
-        local seedToUse
-        if phase == "CARROT_PHASE" and currentMoney >= 600 then -- 30*20
+        -- เปลี่ยน phase
+        if phase == "CARROT_PHASE" and currentMoney >= 800 then
             phase = "TOMATO_PHASE"
             print("🔄 เปลี่ยนเป็นโหมดมะเขือเทศ!")
         end
         
-        if phase == "TOMATO_PHASE" then
-            seedToUse = "Tomato"
-            -- ถ้าเงินไม่พอซื้อ Tomato ให้กลับไป Carrot ชั่วคราว
-            if currentMoney < 30 then
-                seedToUse = "Carrot"
-                print("💸 เงินไม่พอ ปลูก Carrot ชั่วคราว")
-            end
-        else
-            seedToUse = "Carrot"
+        -- เลือกเมล็ด
+        local seedToUse = (phase == "TOMATO_PHASE" and currentMoney >= 30) and "Tomato" or "Carrot"
+        local seedCost = (seedToUse == "Tomato") and 30 or 10
+        
+        print("🌱 กำลังใช้เมล็ด: " .. seedToUse .. " (ราคา: " .. seedCost .. ")")
+        
+        -- เช็คเมล็ดในกระเป๋าก่อน
+        local seedCount = GetSeedCount(seedToUse)
+        print("📦 มีเมล็ด " .. seedToUse .. " อยู่: " .. seedCount .. " ชิ้น")
+        
+        -- ซื้อเมล็ดถ้าไม่มีและมีเงินพอ
+        if seedCount == 0 and currentMoney >= seedCost then
+            print("🛒 ไม่มีเมล็ด กำลังซื้อ...")
+            TryBuySeed(seedToUse)
+            task.wait(0.5)
+            seedCount = GetSeedCount(seedToUse) -- เช็คอีกครั้ง
         end
         
-        -- ปลูก
-        if PlantSeed(seedToUse) then
-            task.wait(0.02)
+        -- ปลูกถ้ามีเมล็ด
+        if seedCount > 0 then
+            local planted = PlantSeed(seedToUse)
+            if planted then
+                task.wait(0.5)
+            else
+                print("⚠️ ปลูกไม่สำเร็จ ลองอีกครั้ง...")
+                task.wait(1)
+            end
         else
-            -- ถ้าปลูกไม่ได้ ลองซื้อเมล็ดก่อน
-            TryBuySeed(seedToUse)
-            task.wait(0.1)
+            print("❌ ไม่มีเมล็ด " .. seedToUse .. " และไม่สามารถซื้อได้")
+            task.wait(2)
         end
         
         -- เก็บเกี่ยว
-        Harvest()
-        task.wait(0.02)
+        local harvested = Harvest()
+        if harvested > 0 then
+            task.wait(0.5)
+        end
         
         -- ขาย
         if cropCount > 0 then
             Sell()
+            task.wait(0.5)
         end
         
-        task.wait(0.05) -- รอสั้นๆ ระหว่างรอบ
+        -- พักสั้นๆ
+        task.wait(0.2)
+        
+        -- ป้องกันค้าง
+        if attempts > 1000 then
+            print("⚠️ ทำงานมากเกินไป รีสตาร์ท...")
+            attempts = 0
+            task.wait(5)
+        end
     end
 end
 
--- เริ่มฟาร์ม
+-- เริ่มต้น
+print("🎮 กำลังเริ่มต้นระบบฟาร์ม...")
+task.wait(2)
 SmartFarm()
